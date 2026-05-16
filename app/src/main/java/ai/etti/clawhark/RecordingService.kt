@@ -81,7 +81,7 @@ class RecordingService : Service() {
         const val SAMPLE_RATE = 16000
         
         // 音频块时长: 15分钟 (每个录音文件的时长)
-        const val CHUNK_DURATION_MS = 1 * 60 * 1000L
+        const val CHUNK_DURATION_MS = 15 * 60 * 1000L
         
         // 语音活动检测阈值: 500 (低于此值视为静音)
         const val VAD_THRESHOLD = 500
@@ -90,13 +90,13 @@ class RecordingService : Service() {
         const val VAD_SILENCE_TIMEOUT_MS = 3000L
         
         // AAC 编码比特率: 32kbps (适合语音,节省存储空间)
-        const val AAC_BIT_RATE = 32000
+        const val AAC_BIT_RATE = 48000
         
         // 音频读取缓冲区大小: 8192 采样点 (约512ms,减少CPU唤醒次数)
         const val READ_BUFFER_SAMPLES = 8192
         
-        // 上传间隔: 2分钟 (调试模式,生产环境建议 60L)
-        const val UPLOAD_INTERVAL_MINUTES = 2L
+        // 上传间隔: 60分钟 (调试模式,生产环境建议 60L)
+        const val UPLOAD_INTERVAL_MINUTES = 60L
         
         // 备用上传间隔: 4小时 (定期上传任务的后备机制)
         const val UPLOAD_FALLBACK_INTERVAL_HOURS = 4L
@@ -105,8 +105,8 @@ class RecordingService : Service() {
         const val UPLOAD_FALLBACK_WORK_NAME = "upload_fallback"
         
         // 状态日志输出间隔: 5分钟
-        // const val STATUS_LOG_INTERVAL_MS = 300_000L
-        const val STATUS_LOG_INTERVAL_MS = 600_00L
+        const val STATUS_LOG_INTERVAL_MS = 300_000L
+        // const val STATUS_LOG_INTERVAL_MS = 600_00L
         // 最小可用空间: 50MB (低于此值停止录音)
         const val MIN_FREE_SPACE_BYTES = 50 * 1024 * 1024L
         
@@ -117,8 +117,8 @@ class RecordingService : Service() {
         const val MIC_RECOVERY_MAX_RETRIES = 5
         
         // 过时临时文件阈值: 20分钟 (超过此时间的.tmp文件视为完整文件)
-        // const val STALE_TMP_THRESHOLD_MS = 20 * 60 * 1000L
-        const val STALE_TMP_THRESHOLD_MS = 2 * 60 * 1000L
+        const val STALE_TMP_THRESHOLD_MS = 20 * 60 * 1000L
+        // const val STALE_TMP_THRESHOLD_MS = 2 * 60 * 1000L
 
         // SharedPreferences 键名 (与 MainActivity 共享)
         const val PREF_FILE = "clawhark"

@@ -15,6 +15,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
     override suspend fun doWork(): Result {
         AppLog.init(applicationContext)
+        AppLog.i(TAG, "上传任务已触发")
         AuthManager.init(applicationContext)
 
         val dir = File(applicationContext.filesDir, "recordings")
