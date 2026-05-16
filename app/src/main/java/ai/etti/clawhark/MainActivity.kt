@@ -179,7 +179,7 @@ class MainActivity : Activity() {
         } else {
             recordGroup.visibility = View.GONE
             authGroup.visibility = View.VISIBLE
-            authStatus.text = "Tap LINK to connect\nyour Google Drive"
+            authStatus.text = "点击关联按钮连接\n你的Google Drive"
             authCode.visibility = View.GONE
         }
     }
@@ -195,7 +195,7 @@ class MainActivity : Activity() {
             startService(intent)
         }
         AuthManager.clearAuth()
-        Toast.makeText(this, "Signed out", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "已退出", Toast.LENGTH_SHORT).show()
         showCorrectScreen()
     }
 
@@ -204,24 +204,24 @@ class MainActivity : Activity() {
     private fun startDeviceCodeFlow() {
         authBtn.isEnabled = false
         authBtn.text = "..."
-        authStatus.text = "Requesting code..."
+        authStatus.text = "正在请求代码..."
         authCode.visibility = View.GONE
 
         scope.launch {
             val response = AuthManager.requestDeviceCode()
             if (response == null) {
                 authBtn.isEnabled = true
-                authBtn.text = "RETRY"
-                authStatus.text = "Failed to connect.\nCheck WiFi and retry."
+                authBtn.text = "重试"
+                authStatus.text = "连接失败\n检查WiFi后重试"
                 return@launch
             }
 
             // Show the user code prominently
-            authTitle.text = "Enter code at"
+            authTitle.text = "在此网址输入代码"
             authStatus.text = "google.com/device"
             authCode.text = response.userCode
             authCode.visibility = View.VISIBLE
-            authBtn.text = "WAITING"
+            authBtn.text = "等待中"
             dotCount = 0
 
             // Poll for authorization
@@ -231,17 +231,17 @@ class MainActivity : Activity() {
                     delay(interval)
                     // Animate dots while polling
                     dotCount = (dotCount + 1) % 4
-                    authBtn.text = "WAITING" + ".".repeat(dotCount)
+                    authBtn.text = "等待中" + ".".repeat(dotCount)
 
                     val result = AuthManager.pollForAuthorization(response.deviceCode)
                     when (result) {
                         is AuthManager.PollResult.Success -> {
                             getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
                                 .edit().putBoolean(RecordingService.PREF_SHOULD_RECORD, true).apply()
-                            authTitle.text = "Connected!"
+                            authTitle.text = "已连接"
                             authStatus.text = ""
                             authCode.visibility = View.GONE
-                            authBtn.text = "OK"
+                            authBtn.text = "确定"
                             delay(1500)
                             showCorrectScreen()
                             val intent = Intent(this@MainActivity, RecordingService::class.java)
@@ -256,19 +256,19 @@ class MainActivity : Activity() {
                             delay(5000)
                         }
                         is AuthManager.PollResult.Expired -> {
-                            authTitle.text = "Link Google Drive"
-                            authStatus.text = "Code expired.\nTap to try again."
+                            authTitle.text = "关联Google Drive"
+                            authStatus.text = "代码已过期\n点击重试"
                             authCode.visibility = View.GONE
                             authBtn.isEnabled = true
-                            authBtn.text = "RETRY"
+                            authBtn.text = "重试"
                             return@pollLoop
                         }
                         is AuthManager.PollResult.Error -> {
-                            authTitle.text = "Link Google Drive"
-                            authStatus.text = "Error: ${result.message}\nTap to retry."
+                            authTitle.text = "关联Google Drive"
+                            authStatus.text = "错误: ${result.message}\n点击重试"
                             authCode.visibility = View.GONE
                             authBtn.isEnabled = true
-                            authBtn.text = "RETRY"
+                            authBtn.text = "重试"
                             return@pollLoop
                         }
                     }
@@ -294,8 +294,8 @@ class MainActivity : Activity() {
             // Stop recording — require two taps for confirmation
             if (!confirmPending) {
                 confirmPending = true
-                toggleBtn.text = "SURE?"
-                statusText.text = "Tap again to stop"
+                toggleBtn.text = "确定?"
+                statusText.text = "再次点击停止"
                 toggleBtn.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                 confirmResetJob = scope.launch {
                     delay(CONFIRM_TIMEOUT_MS)
@@ -324,9 +324,9 @@ class MainActivity : Activity() {
             // Recording state — red button
             toggleBtn.setBackgroundResource(R.drawable.circle_button_recording)
             if (!confirmPending) {
-                statusText.text = "RECORDING"
+                statusText.text = "录音中"
                 statusText.setTextColor(0xFFCC3333.toInt())
-                toggleBtn.text = "STOP"
+                toggleBtn.text = "停止"
             }
 
             val elapsed = System.currentTimeMillis() - svc.recordingStartTime
@@ -336,15 +336,15 @@ class MainActivity : Activity() {
             val chunks = svc.totalChunks
             val mb = String.format("%.1f", svc.getStorageUsed() / 1024.0 / 1024.0)
 
-            infoText.text = "${hrs}h ${m}m | ${chunks} chunks\n${mb} MB | Drive"
+            infoText.text = "${hrs}小时 ${m}分钟 | ${chunks} 片段\n${mb} MB | Drive"
         } else {
             // Stopped state — default button
             toggleBtn.setBackgroundResource(R.drawable.circle_button)
             confirmPending = false
-            statusText.text = "STOPPED"
+            statusText.text = "已停止"
             statusText.setTextColor(0xFF888888.toInt())
-            toggleBtn.text = "START"
-            infoText.text = "Tap to record\nLong press to sign out"
+            toggleBtn.text = "开始"
+            infoText.text = "点击录音\n长按退出登录"
         }
     }
 
@@ -395,7 +395,7 @@ class MainActivity : Activity() {
             val denied = perms.filterIndexed { i, _ -> results[i] != PackageManager.PERMISSION_GRANTED }
             val permanentlyDenied = denied.any { !ActivityCompat.shouldShowRequestPermissionRationale(this, it) }
             if (permanentlyDenied) {
-                Toast.makeText(this, "Permissions required.\nGo to Settings > Apps.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "需要权限\n前往设置 > 应用", Toast.LENGTH_LONG).show()
             }
         }
     }

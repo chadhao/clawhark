@@ -57,9 +57,9 @@ class RecordingComplicationService : SuspendingComplicationDataSourceService() {
     }
 
     private fun buildComplicationData(type: ComplicationType, recording: Boolean): ComplicationData? {
-        val text = if (recording) "REC" else "OFF"
+        val text = if (recording) "录音" else "关"
         val iconRes = if (recording) R.drawable.ic_rec_on else R.drawable.ic_rec_off
-        val description = if (recording) "Recording" else "Stopped"
+        val description = if (recording) "录音中" else "已停止"
         val tap = toggleIntent()
         val icon = MonochromaticImage.Builder(Icon.createWithResource(this, iconRes)).build()
         val complicationText = PlainComplicationText.Builder(text).build()

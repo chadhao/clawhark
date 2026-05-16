@@ -46,36 +46,36 @@ class RecordingService : Service() {
         const val NOTIFICATION_ID = 1
 
         private val LISTENING_WORDS = listOf(
-            "Listening...",
-            "All ears...",
-            "Tuned in...",
-            "Absorbing...",
-            "Catching every word...",
-            "Picking up signals...",
-            "Ears perked...",
-            "Harkening...",
-            "Soaking it in...",
-            "Attuned...",
-            "Capturing the moment...",
-            "Taking it all in...",
-            "Standing by...",
-            "Monitoring...",
-            "Dialed in...",
-            "Zeroed in...",
-            "Keeping tabs...",
-            "Clocking everything...",
-            "Locked on...",
-            "Receiving...",
-            "Hanging on every word...",
-            "Quietly observing...",
-            "Ears to the ground...",
-            "On standby...",
-            "Paying attention...",
-            "In the loop...",
-            "Registering...",
-            "Noting everything...",
-            "Hearing you out...",
-            "Switched on...",
+            "正在聆听...",
+            "全神贯注...",
+            "专心听...",
+            "吸收中...",
+            "捕捉每个字...",
+            "接收信号...",
+            "竖起耳朵...",
+            "倾听中...",
+            "沉浸其中...",
+            "调谐中...",
+            "捕捉瞬间...",
+            "全部记录...",
+            "待命中...",
+            "监听中...",
+            "集中精力...",
+            "精准锁定...",
+            "保持跟踪...",
+            "记录一切...",
+            "锁定中...",
+            "接收中...",
+            "字字入耳...",
+            "静静观察...",
+            "保持警觉...",
+            "待机中...",
+            "专注中...",
+            "实时跟进...",
+            "登记中...",
+            "全面记录...",
+            "仔细聆听...",
+            "已启动...",
         )
         const val SAMPLE_RATE = 16000
         const val CHUNK_DURATION_MS = 15 * 60 * 1000L // 15 minutes
@@ -212,8 +212,8 @@ class RecordingService : Service() {
     }
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(CHANNEL_ID, "Recording", NotificationManager.IMPORTANCE_LOW).apply {
-            description = "Always-on audio recording"
+        val channel = NotificationChannel(CHANNEL_ID, "录音", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "持续录音"
             setShowBadge(false)
         }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
