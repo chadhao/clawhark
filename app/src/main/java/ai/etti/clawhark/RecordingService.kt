@@ -77,22 +77,50 @@ class RecordingService : Service() {
             "仔细聆听...",
             "已启动...",
         )
+        // 音频采样率: 16kHz (语音识别标准采样率)
         const val SAMPLE_RATE = 16000
-        const val CHUNK_DURATION_MS = 15 * 60 * 1000L // 15 minutes
+        
+        // 音频块时长: 15分钟 (每个录音文件的时长)
+        const val CHUNK_DURATION_MS = 1 * 60 * 1000L
+        
+        // 语音活动检测阈值: 500 (低于此值视为静音)
         const val VAD_THRESHOLD = 500
+        
+        // 静音超时: 3秒 (超过3秒静音则停止录音)
         const val VAD_SILENCE_TIMEOUT_MS = 3000L
-        const val AAC_BIT_RATE = 32000 // 32kbps — good for voice
-        const val READ_BUFFER_SAMPLES = 8192 // 512ms at 16kHz — halves CPU wakeups vs 4096
-        const val UPLOAD_INTERVAL_MINUTES = 60L
+        
+        // AAC 编码比特率: 32kbps (适合语音,节省存储空间)
+        const val AAC_BIT_RATE = 32000
+        
+        // 音频读取缓冲区大小: 8192 采样点 (约512ms,减少CPU唤醒次数)
+        const val READ_BUFFER_SAMPLES = 8192
+        
+        // 上传间隔: 2分钟 (调试模式,生产环境建议 60L)
+        const val UPLOAD_INTERVAL_MINUTES = 2L
+        
+        // 备用上传间隔: 4小时 (定期上传任务的后备机制)
         const val UPLOAD_FALLBACK_INTERVAL_HOURS = 4L
+        
+        // 备用上传任务名称
         const val UPLOAD_FALLBACK_WORK_NAME = "upload_fallback"
-        const val STATUS_LOG_INTERVAL_MS = 300_000L // 5 min
-        const val MIN_FREE_SPACE_BYTES = 50 * 1024 * 1024L // 50MB
-        const val MAX_LOCAL_STORAGE_BYTES = 500 * 1024 * 1024L // 500MB — FIFO eviction
+        
+        // 状态日志输出间隔: 5分钟
+        // const val STATUS_LOG_INTERVAL_MS = 300_000L
+        const val STATUS_LOG_INTERVAL_MS = 600_00L
+        // 最小可用空间: 50MB (低于此值停止录音)
+        const val MIN_FREE_SPACE_BYTES = 50 * 1024 * 1024L
+        
+        // 本地存储上限: 500MB (超过则删除最旧的文件)
+        const val MAX_LOCAL_STORAGE_BYTES = 500 * 1024 * 1024L
+        
+        // 麦克风恢复最大重试次数: 5次
         const val MIC_RECOVERY_MAX_RETRIES = 5
-        const val STALE_TMP_THRESHOLD_MS = 20 * 60 * 1000L // 20min — older .tmp files are likely complete
+        
+        // 过时临时文件阈值: 20分钟 (超过此时间的.tmp文件视为完整文件)
+        // const val STALE_TMP_THRESHOLD_MS = 20 * 60 * 1000L
+        const val STALE_TMP_THRESHOLD_MS = 2 * 60 * 1000L
 
-        // Shared preference keys (used by MainActivity too)
+        // SharedPreferences 键名 (与 MainActivity 共享)
         const val PREF_FILE = "clawhark"
         const val PREF_SHOULD_RECORD = "should_record"
         const val ACTION_STOP = "STOP"
@@ -325,6 +353,9 @@ class RecordingService : Service() {
 
         // Schedule periodic uploads via WorkManager
         scheduleUploads()
+        
+        // 调试: 启动后立即触发一次上传测试
+        triggerImmediateUpload()
 
         // Periodic status logger
         scope.launch {
@@ -745,20 +776,20 @@ class RecordingService : Service() {
     private fun scheduleUploads() {
         val wm = WorkManager.getInstance(this)
 
-        // Primary: upload on WiFi (every 60min)
-        val wifiConstraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.UNMETERED)
+        // 主要上传任务: 任何网络上传(包括蓝牙代理)
+        val uploadConstraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)  // 任何网络
             .build()
-        val wifiWork = PeriodicWorkRequestBuilder<UploadWorker>(
+        val uploadWork = PeriodicWorkRequestBuilder<UploadWorker>(
             UPLOAD_INTERVAL_MINUTES, TimeUnit.MINUTES
-        ).setConstraints(wifiConstraints).build()
+        ).setConstraints(uploadConstraints).build()
         wm.enqueueUniquePeriodicWork(
             UploadWorker.WORK_NAME,
             ExistingPeriodicWorkPolicy.UPDATE,
-            wifiWork
+            uploadWork
         )
 
-        // Fallback: upload on any network (every 4h) — handles Bluetooth proxy when WiFi is off
+        // 备用上传任务: 任何网络 (每 4 小时) — 处理蓝牙代理等特殊情况
         val anyNetConstraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -771,16 +802,11 @@ class RecordingService : Service() {
             fallbackWork
         )
 
-        AppLog.i(TAG, "Upload scheduled: every ${UPLOAD_INTERVAL_MINUTES}min (WiFi) + every ${UPLOAD_FALLBACK_INTERVAL_HOURS}h (any network)")
+        AppLog.i(TAG, "上传已调度: 每 ${UPLOAD_INTERVAL_MINUTES}分钟 (任何网络) + 每 ${UPLOAD_FALLBACK_INTERVAL_HOURS}小时 (备用)")
     }
 
     private fun triggerImmediateUpload() {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
         val oneTimeWork = OneTimeWorkRequestBuilder<UploadWorker>()
-            .setConstraints(constraints)
             .build()
 
         WorkManager.getInstance(this).enqueueUniqueWork(
@@ -788,7 +814,7 @@ class RecordingService : Service() {
             ExistingWorkPolicy.REPLACE,
             oneTimeWork
         )
-        AppLog.i(TAG, "One-time upload enqueued for remaining files")
+        AppLog.i(TAG, "立即上传已触发")
     }
 
     // ─── Status & Logging ────────────────────────────────────────────────
@@ -805,7 +831,7 @@ class RecordingService : Service() {
         AppLog.i(TAG, "  Read errors: $totalReadErrors")
         AppLog.i(TAG, "  WakeLock held: ${wakeLock?.isHeld}")
         AppLog.i(TAG, "  Free space: ${getChunkDir().usableSpace / 1024 / 1024}MB")
-        logBatteryStatus(); logAudioState()
+        logBatteryStatus(); logAudioState(); logNetworkStatus()
     }
 
     private fun logStats() {
@@ -836,6 +862,7 @@ class RecordingService : Service() {
             try {
                 @Suppress("DEPRECATION")
                 val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+                @Suppress("DEPRECATION")
                 val cs = when (tm.callState) {
                     TelephonyManager.CALL_STATE_IDLE -> "IDLE"; TelephonyManager.CALL_STATE_RINGING -> "RINGING"
                     TelephonyManager.CALL_STATE_OFFHOOK -> "OFFHOOK"; else -> "unknown"
@@ -843,6 +870,47 @@ class RecordingService : Service() {
                 AppLog.d(TAG, "Phone: callState=$cs")
             } catch (_: Exception) { AppLog.d(TAG, "Phone: unable to read") }
         } catch (_: Exception) { AppLog.d(TAG, "Audio: unable to read") }
+    }
+
+    private fun logNetworkStatus() {
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                // 使用新 API (Android 6.0+)
+                val network = cm.activeNetwork
+                val capabilities = cm.getNetworkCapabilities(network)
+                if (capabilities != null) {
+                    val type = when {
+                        capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "WiFi"
+                        capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "移动网络"
+                        capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_BLUETOOTH) -> "蓝牙"
+                        else -> "其他"
+                    }
+                    val metered = if (cm.isActiveNetworkMetered) "计费" else "免费"
+                    AppLog.d(TAG, "网络: $type 已连接 计费状态=$metered")
+                } else {
+                    AppLog.d(TAG, "网络: 未连接")
+                }
+            } else {
+                // 兼容旧版本 Android
+                @Suppress("DEPRECATION")
+                val activeNetwork = cm.activeNetworkInfo
+                @Suppress("DEPRECATION")
+                if (activeNetwork != null && activeNetwork.isConnected) {
+                    @Suppress("DEPRECATION")
+                    val type = when (activeNetwork.type) {
+                        android.net.ConnectivityManager.TYPE_WIFI -> "WiFi"
+                        android.net.ConnectivityManager.TYPE_MOBILE -> "移动网络"
+                        android.net.ConnectivityManager.TYPE_BLUETOOTH -> "蓝牙"
+                        else -> "类型=${activeNetwork.type}"
+                    }
+                    val metered = if (cm.isActiveNetworkMetered) "计费" else "免费"
+                    AppLog.d(TAG, "网络: $type 已连接 计费状态=$metered")
+                } else {
+                    AppLog.d(TAG, "网络: 未连接")
+                }
+            }
+        } catch (_: Exception) { AppLog.d(TAG, "网络: 无法读取") }
     }
 
     // ─── Cleanup ──────────────────────────────────────────────────────────

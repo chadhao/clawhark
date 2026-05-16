@@ -28,7 +28,7 @@ ClawHark 在后台录制你的日常活动,过滤静音,上传到你的 Google D
 |---------|---------|
 | 🎙️ **始终开启录音** | 前台服务配合唤醒锁——可在息屏和重启后继续运行 |
 | 🔇 **语音活动检测** | 仅在有人说话时保存音频——节省电量和存储空间 |
-| ☁️ **自动上传 Google Drive** | 5 分钟 WAV 音频块通过 WiFi 上传,上传后自动删除 |
+| ☁️ **多云存储支持** | 支持 Google Drive 或 S3 兼容存储(七牛云、阿里云等),5 分钟 WAV 音频块通过 WiFi 上传,上传后自动删除 |
 | 🔄 **启动持久化** | 手表重启后自动恢复录音 |
 | 🎯 **单按钮界面** | 点击开始,双击停止。就这么简单。 |
 | 📱 **无需配套应用** | 完全独立运行在手表上 |
@@ -36,10 +36,10 @@ ClawHark 在后台录制你的日常活动,过滤静音,上传到你的 Google D
 
 ## 🔄 工作原理
 
-> **手表** → 通过 VAD 全天候录音 → **Google Drive** → 自动上传 5 分钟音频块 → **你的电脑** → 拉取、转录、输入 AI
+> **手表** → 通过 VAD 全天候录音 → **云存储(Google Drive/S3)** → 自动上传 5 分钟音频块 → **你的电脑** → 拉取、转录、输入 AI
 
 1. **录音** — 手表持续捕捉音频,语音活动检测过滤静音
-2. **上传** — 音频块上传到你的 Google Drive 中的 `ClawHark/` 文件夹
+2. **上传** — 音频块上传到你的云存储中的 `ClawHark/` 文件夹
 3. **拉取** — 电脑上的脚本下载并按日期整理
 4. **转录** — Whisper + AssemblyAI 生成说话人分离的转录文本
 5. **执行** — 你的 AI 助手读取转录文本并提取行动项目
@@ -53,21 +53,54 @@ ClawHark 在后台录制你的日常活动,过滤静音,上传到你的 Google D
 - JDK 17 + Android SDK
 - 用于手表安装的 [ADB](https://developer.android.com/tools/adb)
 
-### 1. 设置 OAuth
+### 1. 设置存储
+
+ClawHark 支持两种云存储方式:
+
+#### 选项 A: Google Drive (国际用户)
 
 在 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) 中创建 OAuth 2.0 客户端:
 
 - **类型:** TVs and Limited Input devices(电视和受限输入设备)
 - **范围:** `drive.file`
 
-复制 `oauth_config.json.example` → `app/src/main/assets/oauth_config.json` 并填入你的凭据:
+复制 `oauth_config.json.example` → `app/src/main/assets/oauth_config.json` 并配置:
 
 ```json
 {
-  "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-  "client_secret": "YOUR_CLIENT_SECRET"
+  "storage_type": "google_drive",
+  "google_drive": {
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "client_secret": "YOUR_CLIENT_SECRET"
+  }
 }
 ```
+
+#### 选项 B: S3 兼容存储 (中国用户推荐)
+
+使用任何 S3 兼容的对象存储服务,如七牛云、阿里云 OSS、腾讯云 COS 等:
+
+```json
+{
+  "storage_type": "s3",
+  "s3": {
+    "endpoint": "https://s3.cn-east-1.qiniucs.com",
+    "region": "cn-east-1",
+    "bucket": "your-bucket-name",
+    "access_key": "YOUR_ACCESS_KEY",
+    "secret_key": "YOUR_SECRET_KEY",
+    "path_prefix": "ClawHark/"
+  }
+}
+```
+
+**S3 兼容服务配置示例:**
+
+| 服务商 | endpoint 示例 | 文档链接 |
+|--------|--------------|---------|
+| 七牛云 | `https://s3.cn-east-1.qiniucs.com` | [七牛云 S3 兼容](https://developer.qiniu.com/kodo/4086/aws-s3-compatible) |
+| 阿里云 OSS | `https://oss-cn-hangzhou.aliyuncs.com` | [OSS S3 兼容](https://help.aliyun.com/document_detail/64919.html) |
+| 腾讯云 COS | `https://cos.ap-guangzhou.myqcloud.com` | [COS S3 兼容](https://cloud.tencent.com/document/product/436/37421) |
 
 ### 2. 构建
 
@@ -78,6 +111,23 @@ cd clawhark
 ```
 
 ### 3. 安装到手表
+
+#### 查看应用日志（排查问题）
+
+**Windows PowerShell（避免乱码）：**
+```powershell
+# 方法 1: 使用脚本
+.\view-logs.ps1
+
+# 方法 2: 直接命令
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+adb shell "run-as ai.etti.clawhark cat files/logs/clawhark.log" | Select-Object -Last 50
+```
+
+**Linux/Mac：**
+```bash
+adb shell "run-as ai.etti.clawhark cat files/logs/clawhark.log" | tail -50
+```
 
 #### 启用开发者选项和无线调试
 
@@ -103,7 +153,7 @@ adb pair <watch-ip>:<pairing-port>
 
 # 5. 配对成功后，连接手表（使用无线调试主界面显示的IP和端口）
 adb connect <watch-ip>:<port>
-# 示例: adb connect 192.168.1.100:5555
+# 示例: adb connect 192.168.0.112:36371
 ```
 
 **注意**：配对码端口（用于`adb pair`）和连接端口（用于`adb connect`）是不同的。配对成功后，以后只需使用`adb connect`即可。

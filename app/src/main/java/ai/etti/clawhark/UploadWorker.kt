@@ -20,40 +20,55 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val dir = File(applicationContext.filesDir, "recordings")
         if (!dir.exists()) return Result.success()
 
-        // Recover stale .uploading files FIRST — before any early returns.
-        // These are from previous crashed workers. Only recover files older than
-        // 10 minutes to avoid stealing files a concurrent worker is actively uploading.
+        // 首先恢复过时的 .uploading 文件 — 在任何提前返回之前
+        // 这些文件来自之前崩溃的 worker。只恢复超过 10 分钟的文件
+        // 以避免窃取并发 worker 正在活跃上传的文件
         recoverStaleFiles(dir)
 
         if (!AuthManager.isAuthenticated()) {
-            AppLog.d(TAG, "Not authenticated — skipping upload")
+            AppLog.d(TAG, "未认证 — 跳过上传")
             return Result.success()
         }
 
-        // Only upload .m4a files (not .tmp files which are still being written)
+        // 只上传 .m4a 文件(不上传仍在写入的 .tmp 文件)
         val files = dir.listFiles()?.filter { it.extension == "m4a" }?.sortedBy { it.name } ?: emptyList()
         if (files.isEmpty()) {
-            AppLog.d(TAG, "No files to upload")
+            AppLog.d(TAG, "没有文件需要上传")
             return Result.success()
         }
 
-        AppLog.i(TAG, "Upload worker started — ${files.size} files pending")
-        val uploader = DriveUploader()
+        // 根据配置创建上传器
+        val storageConfig = AuthManager.getStorageConfig()
+        val uploader: StorageUploader = when (storageConfig?.storageType) {
+            StorageType.GOOGLE_DRIVE -> DriveUploader()
+            StorageType.S3 -> {
+                storageConfig.s3Config?.let { S3Uploader(it) } 
+                    ?: run {
+                        AppLog.e(TAG, "S3 配置缺失")
+                        return Result.failure()
+                    }
+            }
+            null -> {
+                AppLog.e(TAG, "存储配置缺失")
+                return Result.failure()
+            }
+        }
+
+        AppLog.i(TAG, "上传 worker 已启动 — ${files.size} 个文件待上传 (${uploader.getStorageInfo()})")
         var succeeded = 0
         var failed = 0
         var consecutiveFailures = 0
 
         for (file in files) {
-            // Claim the file by renaming to .uploading — prevents concurrent workers
-            // from uploading the same file
+            // 通过重命名为 .uploading 来占用文件 — 防止并发 worker 上传同一文件
             val uploadingFile = File(file.parent, file.name + ".uploading")
             if (!file.renameTo(uploadingFile)) {
-                // File disappeared or another worker claimed it
-                AppLog.d(TAG, "Could not claim ${file.name} — skipping (likely another worker)")
+                // 文件消失或被另一个 worker 占用
+                AppLog.d(TAG, "无法占用 ${file.name} — 跳过(可能是另一个 worker)")
                 continue
             }
 
-            AppLog.i(TAG, "Uploading: ${file.name} (${uploadingFile.length() / 1024}KB)")
+            AppLog.i(TAG, "上传中: ${file.name} (${uploadingFile.length() / 1024}KB)")
             val startMs = System.currentTimeMillis()
             val ok = uploader.uploadFile(uploadingFile)
             val elapsed = System.currentTimeMillis() - startMs
@@ -62,23 +77,23 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 uploadingFile.delete()
                 succeeded++
                 consecutiveFailures = 0
-                AppLog.i(TAG, "Upload SUCCESS: ${file.name} in ${elapsed}ms ($succeeded/${files.size})")
+                AppLog.i(TAG, "上传成功: ${file.name} 耗时 ${elapsed}ms ($succeeded/${files.size})")
             } else {
-                // Rename back so it can be retried next time
+                // 重命名回来以便下次重试
                 if (!uploadingFile.renameTo(file)) {
-                    AppLog.w(TAG, "Could not restore ${uploadingFile.name} — file may be orphaned")
+                    AppLog.w(TAG, "无法恢复 ${uploadingFile.name} — 文件可能孤立")
                 }
                 failed++
                 consecutiveFailures++
-                AppLog.e(TAG, "Upload FAILED: ${file.name} after ${elapsed}ms ($failed failures)")
+                AppLog.e(TAG, "上传失败: ${file.name} 耗时 ${elapsed}ms ($failed 次失败)")
                 if (consecutiveFailures >= 3) {
-                    AppLog.e(TAG, "3 consecutive failures — stopping (likely network issue)")
+                    AppLog.e(TAG, "连续 3 次失败 — 停止(可能是网络问题)")
                     break
                 }
             }
         }
 
-        AppLog.i(TAG, "Upload worker done — $succeeded succeeded, $failed failed of ${files.size}")
+        AppLog.i(TAG, "上传 worker 完成 — $succeeded 成功, $failed 失败,共 ${files.size} 个")
         return if (failed == 0) Result.success() else Result.retry()
     }
 
@@ -92,7 +107,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             val originalName = stale.name.removeSuffix(".uploading")
             val original = File(dir, originalName)
             if (stale.renameTo(original)) {
-                AppLog.i(TAG, "Recovered stale uploading file: $originalName (age: ${ageMs / 1000}s)")
+                AppLog.i(TAG, "恢复过时的上传文件: $originalName (年龄: ${ageMs / 1000}s)")
             }
         }
     }

@@ -173,14 +173,28 @@ class MainActivity : Activity() {
     }
 
     private fun showCorrectScreen() {
+        val storageConfig = AuthManager.getStorageConfig()
+        val storageType = storageConfig?.storageType ?: StorageType.GOOGLE_DRIVE
+        
         if (AuthManager.isAuthenticated()) {
             authGroup.visibility = View.GONE
             recordGroup.visibility = View.VISIBLE
         } else {
             recordGroup.visibility = View.GONE
             authGroup.visibility = View.VISIBLE
-            authStatus.text = "点击关联按钮连接\n你的Google Drive"
-            authCode.visibility = View.GONE
+            
+            // 根据存储类型显示不同的认证提示
+            when (storageType) {
+                StorageType.GOOGLE_DRIVE -> {
+                    authStatus.text = "点击关联按钮连接\n你的Google Drive"
+                    authCode.visibility = View.GONE
+                }
+                StorageType.S3 -> {
+                    // S3 不需要 OAuth 流程,直接显示已配置
+                    authGroup.visibility = View.GONE
+                    recordGroup.visibility = View.VISIBLE
+                }
+            }
         }
     }
 
@@ -319,9 +333,16 @@ class MainActivity : Activity() {
     private fun updateUI() {
         if (!AuthManager.isAuthenticated()) return
 
+        val storageConfig = AuthManager.getStorageConfig()
+        val storageInfo = when (storageConfig?.storageType) {
+            StorageType.GOOGLE_DRIVE -> "Drive"
+            StorageType.S3 -> "S3"
+            null -> "未知"
+        }
+
         val svc = service
         if (svc != null && svc.isCurrentlyRecording()) {
-            // Recording state — red button
+            // 录音状态 — 红色按钮
             toggleBtn.setBackgroundResource(R.drawable.circle_button_recording)
             if (!confirmPending) {
                 statusText.text = "录音中"
@@ -336,9 +357,9 @@ class MainActivity : Activity() {
             val chunks = svc.totalChunks
             val mb = String.format("%.1f", svc.getStorageUsed() / 1024.0 / 1024.0)
 
-            infoText.text = "${hrs}小时 ${m}分钟 | ${chunks} 片段\n${mb} MB | Drive"
+            infoText.text = "${hrs}小时 ${m}分钟 | ${chunks} 片段\n${mb} MB | $storageInfo"
         } else {
-            // Stopped state — default button
+            // 停止状态 — 默认按钮
             toggleBtn.setBackgroundResource(R.drawable.circle_button)
             confirmPending = false
             statusText.text = "已停止"

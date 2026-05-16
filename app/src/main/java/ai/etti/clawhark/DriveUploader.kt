@@ -13,10 +13,10 @@ import java.net.URL
 import java.util.UUID
 
 /**
- * Uploads files to a "ClawHark" folder in Google Drive.
- * Uses AuthManager for OAuth tokens — no credentials stored here.
+ * 上传文件到 Google Drive 的 "ClawHark" 文件夹。
+ * 使用 AuthManager 进行 OAuth 认证 — 此处不存储凭证。
  */
-class DriveUploader {
+class DriveUploader : StorageUploader {
 
     companion object {
         const val TAG = "Drive"
@@ -26,6 +26,10 @@ class DriveUploader {
     }
 
     private var folderId: String? = null
+
+    override fun getStorageType(): StorageType = StorageType.GOOGLE_DRIVE
+
+    override fun getStorageInfo(): String = "Drive"
 
     private suspend fun getOrCreateFolder(token: String): String? = withContext(Dispatchers.IO) {
         folderId?.let {
@@ -99,7 +103,7 @@ class DriveUploader {
         folderId
     }
 
-    suspend fun uploadFile(file: File): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun uploadFile(file: File): Boolean = withContext(Dispatchers.IO) {
         val fileSize = file.length()
         AppLog.i(TAG, "=== UPLOAD START: ${file.name} (${fileSize/1024}KB) ===")
 
@@ -129,7 +133,8 @@ class DriveUploader {
             conn.setChunkedStreamingMode(0)
 
             val metadata = JSONObject().apply {
-                put("name", file.name)
+                // 移除 .uploading 后缀(如果存在)以获得正确的文件名
+                put("name", file.name.removeSuffix(".uploading"))
                 put("parents", JSONArray().put(folder))
             }
 

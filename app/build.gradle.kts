@@ -56,4 +56,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("androidx.security:security-crypto:1.0.0")
     implementation("androidx.wear.watchface:watchface-complications-data-source-ktx:1.2.1")
+    
+    // AWS SDK for S3
+    implementation("com.amazonaws:aws-android-sdk-s3:2.77.0")
+    implementation("com.amazonaws:aws-android-sdk-core:2.77.0")
 }

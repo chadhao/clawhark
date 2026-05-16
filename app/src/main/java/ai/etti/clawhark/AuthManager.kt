@@ -16,30 +16,35 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Manages Google OAuth2 via the Device Authorization Grant (RFC 8628).
+ * 管理认证和存储配置。
  *
- * First-time flow:
- *   1. Call requestDeviceCode() — returns a user code + verification URL
- *   2. User visits the URL on their phone/computer and enters the code
- *   3. Call pollForAuthorization(deviceCode) repeatedly until success
- *   4. Refresh token is stored in EncryptedSharedPreferences for future use
+ * Google OAuth2 通过设备授权授予 (RFC 8628) 方式:
+ *   1. 调用 requestDeviceCode() — 返回用户代码 + 验证 URL
+ *   2. 用户在手机/电脑上访问该 URL 并输入代码
+ *   3. 重复调用 pollForAuthorization(deviceCode) 直到成功
+ *   4. Refresh token 存储在 EncryptedSharedPreferences 中供后续使用
  *
- * Subsequent launches:
- *   - Call getAccessToken() — refreshes automatically using stored refresh token
+ * 后续启动:
+ *   - 调用 getAccessToken() — 使用存储的 refresh token 自动刷新
  *
- * Setup: Create an OAuth 2.0 client in Google Cloud Console:
- *   - Application type: "TVs and Limited Input devices"
- *   - No client_secret needed for this type
- *   - Enable the Google Drive API for the project
- *   - Set CLIENT_ID below to your client ID
+ * S3 存储:
+ *   - 直接从配置文件读取凭证,无需 OAuth 流程
+ *
+ * 设置: 在 Google Cloud Console 中创建 OAuth 2.0 客户端:
+ *   - 应用程序类型: "TV 和受限输入设备"
+ *   - 此类型不需要 client_secret
+ *   - 为项目启用 Google Drive API
+ *   - 在 assets/oauth_config.json 中设置配置
  */
 object AuthManager {
     private const val TAG = "Auth"
 
-    // OAuth credentials loaded from assets/oauth_config.json at runtime.
-    // See oauth_config.json.example for the format.
-    // Create your own at: https://console.cloud.google.com/apis/credentials
-    // Application type: "TVs and Limited Input devices"
+    private var storageConfig: StorageConfig? = null
+
+    // OAuth 凭证在运行时从 assets/oauth_config.json 加载
+    // 参考 oauth_config.json.example 了解格式
+    // 创建你自己的: https://console.cloud.google.com/apis/credentials
+    // 应用程序类型: "TV 和受限输入设备"
     private var CLIENT_ID = ""
     private var CLIENT_SECRET = ""
 
@@ -61,15 +66,19 @@ object AuthManager {
         if (prefs != null) return
         val appContext = context.applicationContext
 
-        // Load OAuth config from assets
-        try {
-            val json = appContext.assets.open("oauth_config.json").bufferedReader().readText()
-            val config = JSONObject(json)
-            CLIENT_ID = config.getString("client_id")
-            CLIENT_SECRET = config.optString("client_secret", "")
-            AppLog.i(TAG, "OAuth config loaded (client_id ends ...${CLIENT_ID.takeLast(12)})")
-        } catch (e: Exception) {
-            AppLog.e(TAG, "Failed to load oauth_config.json from assets — auth will fail", e)
+        // 从 assets 加载存储配置
+        storageConfig = StorageConfig.loadFromAssets(appContext)
+        if (storageConfig == null || !storageConfig!!.validate()) {
+            AppLog.e(TAG, "存储配置无效或缺失 — 功能将受限")
+        }
+
+        // 如果使用 Google Drive,加载 OAuth 配置
+        if (storageConfig?.storageType == StorageType.GOOGLE_DRIVE) {
+            storageConfig?.googleDriveConfig?.let { gdConfig ->
+                CLIENT_ID = gdConfig.clientId
+                CLIENT_SECRET = gdConfig.clientSecret
+                AppLog.i(TAG, "Google Drive OAuth 配置已加载 (client_id 末尾 ...${CLIENT_ID.takeLast(12)})")
+            }
         }
         try {
             val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
@@ -94,10 +103,12 @@ object AuthManager {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         }
-
-        // Migrate from old unencrypted prefs if they exist
+        
+        // 迁移旧的未加密首选项(如果存在)
         migrateFromPlainPrefs(appContext)
     }
+
+    fun getStorageConfig(): StorageConfig? = storageConfig
 
     private fun requirePrefs(): SharedPreferences =
         prefs ?: throw IllegalStateException("AuthManager.init() not called")
@@ -126,7 +137,11 @@ object AuthManager {
     }
 
     fun isAuthenticated(): Boolean {
-        return requirePrefs().getString(PREF_REFRESH_TOKEN, null) != null
+        return when (storageConfig?.storageType) {
+            StorageType.GOOGLE_DRIVE -> requirePrefs().getString(PREF_REFRESH_TOKEN, null) != null
+            StorageType.S3 -> storageConfig?.s3Config != null
+            null -> false
+        }
     }
 
     fun clearAuth() {

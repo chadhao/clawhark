@@ -1,4 +1,15 @@
 {
-  "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-  "client_secret": ""
+  "storage_type": "google_drive",
+  "google_drive": {
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "client_secret": ""
+  },
+  "s3": {
+    "endpoint": "https://s3.cn-east-1.qiniucs.com",
+    "region": "cn-east-1",
+    "bucket": "your-bucket-name",
+    "access_key": "YOUR_ACCESS_KEY",
+    "secret_key": "YOUR_SECRET_KEY",
+    "path_prefix": "ClawHark/"
+  }
 }
