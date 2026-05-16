@@ -79,11 +79,45 @@ cd clawhark
 
 ### 3. 安装到手表
 
-```bash
-# 在手表上启用无线调试:
-# 设置 → 开发者选项 → 无线调试
+#### 启用开发者选项和无线调试
 
+在手表上：
+1. 打开 **设置** → **系统** → **关于**
+2. 连续点击 **版本号** 7次，启用开发者选项
+3. 返回 **设置** → **系统** → **开发者选项**
+4. 启用 **无线调试**
+
+#### 首次配对（仅需一次）
+
+```bash
+# 1. 在手表上点击"无线调试"，选择"使用配对码配对设备"
+# 2. 手表会显示：
+#    - 配对码（6位数字）
+#    - IP地址和端口（例如：192.168.1.100:12345）
+
+# 3. 在电脑上执行配对命令
+adb pair <watch-ip>:<pairing-port>
+# 示例: adb pair 192.168.1.100:12345
+
+# 4. 输入手表上显示的6位配对码
+
+# 5. 配对成功后，连接手表（使用无线调试主界面显示的IP和端口）
 adb connect <watch-ip>:<port>
+# 示例: adb connect 192.168.1.100:5555
+```
+
+**注意**：配对码端口（用于`adb pair`）和连接端口（用于`adb connect`）是不同的。配对成功后，以后只需使用`adb connect`即可。
+
+#### 后续连接（已配对）
+
+```bash
+# 直接连接（使用无线调试主界面显示的IP和端口）
+adb connect <watch-ip>:<port>
+
+# 验证连接
+adb devices
+
+# 安装APK
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -122,17 +156,145 @@ openclaw cron create \
 
 查看 [openclaw/README.md](openclaw/README.md) 了解完整的集成指南,包括转录设置、心跳自动化和行动项提取。
 
-## 🔧 调试
+## 🔧 调试与ADB常用命令
+
+### 设备连接
 
 ```bash
-# 查看日志
+# 首次配对（仅需一次）
+# 手表上：无线调试 → 使用配对码配对设备
+adb pair <watch-ip>:<pairing-port>
+# 然后输入手表显示的6位配对码
+# 示例: adb pair 192.168.1.100:12345
+
+# 连接手表（无线调试）
+adb connect <watch-ip>:<port>
+# 示例: adb connect 192.168.1.100:5555
+
+# 查看已连接的设备
+adb devices
+# 输出示例:
+# List of devices attached
+# 192.168.1.100:5555    device
+# emulator-5554         device
+
+# 断开指定设备
+adb disconnect <watch-ip>:<port>
+
+# 断开所有设备
+adb disconnect
+
+# 通过USB连接（如支持）
+adb usb
+```
+
+### 应用安装与管理
+
+```bash
+# 安装APK
+adb install app/build/outputs/apk/debug/app-debug.apk
+
+# 安装到指定设备（多设备时）
+adb -s emulator-5554 install app/build/outputs/apk/debug/app-debug.apk
+
+# 卸载应用
+adb uninstall ai.etti.clawhark
+
+# 重新安装（保留数据）
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# 启动应用
+adb shell am start -n ai.etti.clawhark/.MainActivity
+
+# 强制停止应用
+adb shell am force-stop ai.etti.clawhark
+```
+
+### 日志查看
+
+```bash
+# 查看应用日志文件（最后50行）
 adb shell "run-as ai.etti.clawhark cat files/logs/clawhark.log" | tail -50
 
-# 实时 logcat
+# Windows PowerShell查看日志
+adb shell "run-as ai.etti.clawhark cat files/logs/clawhark.log" | Select-Object -Last 50
+
+# 实时 logcat（过滤关键标签）
 adb logcat -s "CH.Service" "CH.Drive" "CH.Auth"
 
-# 检查手表上的录音
+# 查看所有应用日志
+adb logcat | Select-String "clawhark"
+
+# 清除logcat缓冲区
+adb logcat -c
+```
+
+### 文件系统操作
+
+```bash
+# 查看手表上的录音文件
 adb shell "run-as ai.etti.clawhark ls -la files/recordings/"
+
+# 下载录音文件到电脑
+adb shell "run-as ai.etti.clawhark cat files/recordings/recording_xxx.wav" > recording.wav
+
+# 查看应用数据目录
+adb shell "run-as ai.etti.clawhark ls -la files/"
+
+# 查看应用日志目录
+adb shell "run-as ai.etti.clawhark ls -la files/logs/"
+
+# 清空录音文件（谨慎使用）
+adb shell "run-as ai.etti.clawhark rm files/recordings/*.wav"
+```
+
+### 应用信息查询
+
+```bash
+# 检查应用是否已安装
+adb shell pm list packages | grep clawhark
+
+# 查看应用详细信息
+adb shell dumpsys package ai.etti.clawhark
+
+# 查看应用权限
+adb shell dumpsys package ai.etti.clawhark | grep permission
+
+# 查看应用存储使用情况
+adb shell du -sh /data/data/ai.etti.clawhark
+```
+
+### 调试技巧
+
+```bash
+# 授予录音权限（如果未授权）
+adb shell pm grant ai.etti.clawhark android.permission.RECORD_AUDIO
+
+# 查看后台服务状态
+adb shell dumpsys activity services ai.etti.clawhark
+
+# 查看电池优化状态
+adb shell dumpsys deviceidle whitelist | grep clawhark
+
+# 模拟低电量模式（测试后台运行）
+adb shell cmd battery set level 15
+
+# 恢复正常电量
+adb shell cmd battery reset
+```
+
+### 多设备管理
+
+```bash
+# 列出所有设备及其状态
+adb devices -l
+
+# 指定设备执行命令
+adb -s <device-id> shell <command>
+
+# 设置默认设备（环境变量）
+export ANDROID_SERIAL=emulator-5554  # Linux/Mac
+$env:ANDROID_SERIAL = "emulator-5554"  # Windows PowerShell
 ```
 
 <details>
