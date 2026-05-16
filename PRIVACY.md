@@ -1,73 +1,73 @@
-# ClawHark Privacy Policy
+# ClawHark 隐私政策
 
-**Last updated:** February 28, 2026
+**最后更新:** 2026 年 2 月 28 日
 
-## Overview
+## 概述
 
-ClawHark is an open-source audio recording app for Wear OS. It records audio on your watch and uploads it to **your own** Google Drive account. We do not operate any servers or collect any data.
+ClawHark 是一款面向 Wear OS 的开源音频录制应用。它在你的手表上录制音频并上传到**你自己的** Google Drive 账户。我们不运营任何服务器,也不收集任何数据。
 
-## Data Collection
+## 数据收集
 
-**ClawHark does not collect, store, or transmit any personal data to us or any third party.**
+**ClawHark 不会向我们或任何第三方收集、存储或传输任何个人数据。**
 
-### What the app accesses
+### 应用访问的内容
 
-| Data | Purpose | Where it goes |
+| 数据 | 用途 | 去向 |
 |------|---------|---------------|
-| Microphone audio | Recording conversations | Saved locally on watch, then uploaded to YOUR Google Drive |
-| Google Drive (scoped) | Cloud backup of recordings | Your personal Drive account only, in a "ClawHark" folder |
+| 麦克风音频 | 录制对话 | 本地保存在手表上,然后上传到你的 Google Drive |
+| Google Drive(权限限定) | 录音的云备份 | 仅你的个人 Drive 账户,位于"ClawHark"文件夹中 |
 
-### What we do NOT collect
+### 我们不会收集的内容
 
-- No analytics or telemetry
-- No crash reporting to external services
-- No advertising identifiers
-- No location data
-- No contact information
-- No usage tracking
+- 无分析或遥测
+- 无向外部服务的崩溃报告
+- 无广告标识符
+- 无位置数据
+- 无联系信息
+- 无使用情况追踪
 
-## Data Storage & Transfer
+## 数据存储和传输
 
-1. **On-device:** Audio is recorded as AAC files (M4A container) and stored temporarily on the watch. A local log file (`clawhark.log`) records app activity metadata (timestamps, upload status) but not audio content.
-2. **Google Drive:** Files are uploaded to a "ClawHark" folder in your Google Drive using the `drive.file` scope (the app can only access files it created — it cannot read your other Drive files)
-3. **Auto-cleanup:** Local files are deleted after successful upload. Local storage is capped at 500 MB with oldest files removed first.
-4. **Auto-restart:** If you have signed in and started recording, the app will automatically resume recording after a device reboot.
+1. **设备端:** 音频以 AAC 文件(M4A 容器)的形式录制并临时存储在手表上。本地日志文件(`clawhark.log`)记录应用活动元数据(时间戳、上传状态),但不记录音频内容。
+2. **Google Drive:** 使用 `drive.file` 权限范围将文件上传到你的 Google Drive 中的"ClawHark"文件夹(应用只能访问自己创建的文件——无法读取你的其他 Drive 文件)
+3. **自动清理:** 成功上传后删除本地文件。本地存储限制为 500 MB,优先删除最旧的文件。
+4. **自动重启:** 如果你已登录并开始录音,设备重启后应用将自动恢复录音。
 
-All data transfer uses HTTPS encryption. Audio files are not encrypted at rest on the watch or in Drive.
+所有数据传输使用 HTTPS 加密。音频文件在手表或 Drive 上不进行静态加密。
 
 ## Google OAuth
 
-ClawHark uses Google's Device Authorization flow to link your Google account. The app requests only the `drive.file` scope, which limits access to files created by the app. You can revoke access at any time via [Google Account permissions](https://myaccount.google.com/permissions).
+ClawHark 使用 Google 的设备授权流程来关联你的 Google 账户。应用仅请求 `drive.file` 权限范围,该权限仅限于访问应用创建的文件。你可以随时通过 [Google 账户权限](https://myaccount.google.com/permissions)撤销访问权限。
 
-## Third-Party Services
+## 第三方服务
 
-The app uses only:
-- **Google Drive API** — for uploading recordings (governed by [Google's Privacy Policy](https://policies.google.com/privacy))
+应用仅使用:
+- **Google Drive API** — 用于上传录音(受 [Google 隐私政策](https://policies.google.com/privacy)约束)
 
-No other third-party services, SDKs, or analytics tools are included.
+不包含其他第三方服务、SDK 或分析工具。
 
-## Your Rights
+## 你的权利
 
-- You can stop recording at any time
-- You can sign out to revoke Drive access
-- You can delete all recordings from your Google Drive
-- You can uninstall the app to remove all local data
-- You can revoke OAuth access via your Google Account settings
+- 你可以随时停止录音
+- 你可以退出登录以撤销 Drive 访问权限
+- 你可以从 Google Drive 中删除所有录音
+- 你可以卸载应用以删除所有本地数据
+- 你可以通过 Google 账户设置撤销 OAuth 访问权限
 
-## Open Source
+## 开源
 
-ClawHark is fully open source. You can inspect the complete source code to verify these claims:
+ClawHark 完全开源。你可以检查完整的源代码来验证这些声明:
 https://github.com/etticat/clawhark
 
-## Children's Privacy
+## 儿童隐私
 
-ClawHark is not directed at children under 13. We do not knowingly collect data from children.
+ClawHark 不面向 13 岁以下儿童。我们不会故意收集儿童数据。
 
-## Changes
+## 变更
 
-We may update this policy. Changes will be posted in the GitHub repository and reflected in the "Last updated" date above.
+我们可能会更新此政策。变更将发布在 GitHub 仓库中,并反映在上面的"最后更新"日期中。
 
-## Contact
+## 联系方式
 
-For questions about this privacy policy:
+关于此隐私政策的问题:
 - GitHub Issues: https://github.com/etticat/clawhark/issues

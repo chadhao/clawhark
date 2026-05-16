@@ -5,8 +5,8 @@
 <h1 align="center">ClawHark</h1>
 
 <p align="center">
-  <strong>Turn any Wear OS watch into an AI wearable.</strong><br>
-  Open source · No subscription · Your data stays yours
+  <strong>将任何 Wear OS 手表变成 AI 可穿戴设备。</strong><br>
+  开源 · 无订阅 · 数据属于你
 </p>
 
 <p align="center">
@@ -18,49 +18,49 @@
 
 ---
 
-Like [Omi](https://omi.me), [Limitless](https://limitless.ai), or [Bee](https://bee.computer) — but running on hardware you already own.
+类似 [Omi](https://omi.me)、[Limitless](https://limitless.ai) 或 [Bee](https://bee.computer)——但运行在你已拥有的硬件上。
 
-ClawHark records your day in the background, filters out silence, uploads to your Google Drive, and feeds into any AI transcription pipeline. Pair it with [OpenClaw](https://github.com/openclaw/openclaw) for a fully automated wearable AI setup.
+ClawHark 在后台录制你的日常活动,过滤静音,上传到你的 Google Drive,并输入任何 AI 转录管道。与 [OpenClaw](https://github.com/openclaw/openclaw) 配对,实现完全自动化的可穿戴 AI 设置。
 
-## ✨ Features
+## ✨ 功能特性
 
-| Feature | Details |
+| 功能 | 详情 |
 |---------|---------|
-| 🎙️ **Always-on recording** | Foreground service with wake lock — survives screen off and reboots |
-| 🔇 **Voice Activity Detection** | Only saves audio when someone is speaking — saves battery and storage |
-| ☁️ **Auto Google Drive upload** | 5-min WAV chunks upload over WiFi, auto-deleted after |
-| 🔄 **Boot persistence** | Recording resumes automatically after watch restart |
-| 🎯 **One-button UI** | Tap to start, tap twice to stop. That's it. |
-| 📱 **No companion app** | Fully standalone on the watch |
-| 🔒 **Privacy first** | `drive.file` scope — can only see its own files. No analytics, no tracking |
+| 🎙️ **始终开启录音** | 前台服务配合唤醒锁——可在息屏和重启后继续运行 |
+| 🔇 **语音活动检测** | 仅在有人说话时保存音频——节省电量和存储空间 |
+| ☁️ **自动上传 Google Drive** | 5 分钟 WAV 音频块通过 WiFi 上传,上传后自动删除 |
+| 🔄 **启动持久化** | 手表重启后自动恢复录音 |
+| 🎯 **单按钮界面** | 点击开始,双击停止。就这么简单。 |
+| 📱 **无需配套应用** | 完全独立运行在手表上 |
+| 🔒 **隐私优先** | `drive.file` 权限范围——只能访问自己创建的文件。无分析,无追踪 |
 
-## 🔄 How It Works
+## 🔄 工作原理
 
-> **Watch** → records 24/7 with VAD → **Google Drive** → auto-uploads 5-min chunks → **Your computer** → pulls, transcribes, feeds to AI
+> **手表** → 通过 VAD 全天候录音 → **Google Drive** → 自动上传 5 分钟音频块 → **你的电脑** → 拉取、转录、输入 AI
 
-1. **Record** — Watch captures audio continuously, Voice Activity Detection filters silence
-2. **Upload** — Chunks upload to a `ClawHark/` folder in your Google Drive
-3. **Pull** — A script on your computer downloads and organizes by date
-4. **Transcribe** — Whisper + AssemblyAI produce speaker-diarized transcripts
-5. **Act** — Your AI assistant reads the transcripts and extracts action items
+1. **录音** — 手表持续捕捉音频,语音活动检测过滤静音
+2. **上传** — 音频块上传到你的 Google Drive 中的 `ClawHark/` 文件夹
+3. **拉取** — 电脑上的脚本下载并按日期整理
+4. **转录** — Whisper + AssemblyAI 生成说话人分离的转录文本
+5. **执行** — 你的 AI 助手读取转录文本并提取行动项目
 
-## 🚀 Quick Start
+## 🚀 快速开始
 
-### Prerequisites
+### 前置要求
 
-- Wear OS 4+ watch (tested on Pixel Watch 3)
-- [Google Cloud project](https://console.cloud.google.com/) with Drive API enabled
+- Wear OS 4+ 手表(已在 Pixel Watch 3 上测试)
+- 启用了 Drive API 的 [Google Cloud 项目](https://console.cloud.google.com/)
 - JDK 17 + Android SDK
-- [ADB](https://developer.android.com/tools/adb) for watch installation
+- 用于手表安装的 [ADB](https://developer.android.com/tools/adb)
 
-### 1. Set up OAuth
+### 1. 设置 OAuth
 
-Create an OAuth 2.0 client in [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
+在 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) 中创建 OAuth 2.0 客户端:
 
-- **Type:** TVs and Limited Input devices
-- **Scope:** `drive.file`
+- **类型:** TVs and Limited Input devices(电视和受限输入设备)
+- **范围:** `drive.file`
 
-Copy `oauth_config.json.example` → `app/src/main/assets/oauth_config.json` and fill in your credentials:
+复制 `oauth_config.json.example` → `app/src/main/assets/oauth_config.json` 并填入你的凭据:
 
 ```json
 {
@@ -69,7 +69,7 @@ Copy `oauth_config.json.example` → `app/src/main/assets/oauth_config.json` and
 }
 ```
 
-### 2. Build
+### 2. 构建
 
 ```bash
 git clone https://github.com/etticat/clawhark.git
@@ -77,31 +77,31 @@ cd clawhark
 ./gradlew assembleDebug
 ```
 
-### 3. Install on watch
+### 3. 安装到手表
 
 ```bash
-# Enable wireless debugging on watch:
-# Settings → Developer Options → Wireless debugging
+# 在手表上启用无线调试:
+# 设置 → 开发者选项 → 无线调试
 
 adb connect <watch-ip>:<port>
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 4. Start recording
+### 4. 开始录音
 
-Open **ClawHark** on your watch → **Link** your Google Drive → tap **Start**. Done.
+在你的手表上打开 **ClawHark** → **关联**你的 Google Drive → 点击 **Start**。完成。
 
-## 🤖 Using with OpenClaw
+## 🤖 与 OpenClaw 配合使用
 
-[OpenClaw](https://github.com/openclaw/openclaw) turns ClawHark into a fully automated AI wearable pipeline. See the **[full OpenClaw setup guide](openclaw/)** for detailed instructions, or get started quickly:
+[OpenClaw](https://github.com/openclaw/openclaw) 将 ClawHark 转变为完全自动化的 AI 可穿戴管道。查看**[完整的 OpenClaw 设置指南](openclaw/)**了解详细说明,或快速开始:
 
-### Install the skill
+### 安装技能
 
 ```bash
 cp -r openclaw/skills/clawhark ~/.openclaw/skills/
 ```
 
-### Add a pull cron
+### 添加拉取定时任务
 
 ```bash
 openclaw cron create \
@@ -110,101 +110,101 @@ openclaw cron create \
   --message "Run scripts/pull.sh from the ClawHark repo to sync watch recordings"
 ```
 
-### The full loop
+### 完整流程
 
 ```
-Meeting happens → watch records it
-  → Drive upload (automatic)
-  → OpenClaw pulls + transcribes (cron)
-  → AI extracts: "You told Sarah you'd send the proposal by Friday"
-  → Task created → Telegram notification
+会议进行中 → 手表录音
+  → Drive 上传(自动)
+  → OpenClaw 拉取 + 转录(定时任务)
+  → AI 提取:"你告诉 Sarah 会在周五前发送提案"
+  → 创建任务 → Telegram 通知
 ```
 
-See [openclaw/README.md](openclaw/README.md) for the complete integration guide including transcription setup, heartbeat automation, and action extraction.
+查看 [openclaw/README.md](openclaw/README.md) 了解完整的集成指南,包括转录设置、心跳自动化和行动项提取。
 
-## 🔧 Debugging
+## 🔧 调试
 
 ```bash
-# View logs
+# 查看日志
 adb shell "run-as ai.etti.clawhark cat files/logs/clawhark.log" | tail -50
 
-# Live logcat
+# 实时 logcat
 adb logcat -s "CH.Service" "CH.Drive" "CH.Auth"
 
-# Check recordings on watch
+# 检查手表上的录音
 adb shell "run-as ai.etti.clawhark ls -la files/recordings/"
 ```
 
 <details>
-<summary><strong>Common issues</strong></summary>
+<summary><strong>常见问题</strong></summary>
 
-| Problem | Cause | Fix |
+| 问题 | 原因 | 解决方法 |
 |---------|-------|-----|
-| All chunks silent | VAD threshold too high | Lower `VAD_THRESHOLD` in `RecordingService.kt` |
-| Upload failures | WiFi dropped | Check watch WiFi settings, disable battery saver |
-| `ERROR_DEAD_OBJECT` | Phone call took the mic | Auto-recovers after call ends |
-| Service killed | Memory pressure | Disable battery optimization for ClawHark |
-| No recordings after reboot | Boot receiver | Launch the app manually once |
+| 所有音频块都是静音 | VAD 阈值过高 | 在 `RecordingService.kt` 中降低 `VAD_THRESHOLD` |
+| 上传失败 | WiFi 断开 | 检查手表 WiFi 设置,禁用省电模式 |
+| `ERROR_DEAD_OBJECT` | 电话占用了麦克风 | 通话结束后自动恢复 |
+| 服务被杀死 | 内存压力 | 为 ClawHark 禁用电池优化 |
+| 重启后无录音 | 启动接收器 | 手动启动一次应用 |
 
 </details>
 
-## 📁 Project Structure
+## 📁 项目结构
 
 ```
 clawhark/
 ├── app/src/main/
 │   ├── assets/
-│   │   └── oauth_config.json.example    # OAuth credentials template
+│   │   └── oauth_config.json.example    # OAuth 凭据模板
 │   ├── java/.../
-│   │   ├── AppLog.kt                    # Persistent file logger
-│   │   ├── AuthManager.kt              # Device code OAuth2 flow
-│   │   ├── DriveUploader.kt            # Google Drive upload
-│   │   ├── MainActivity.kt             # One-button UI
-│   │   └── RecordingService.kt         # Audio capture, VAD, chunking
-│   └── res/                             # Icons, layouts, colors
+│   │   ├── AppLog.kt                    # 持久化文件日志记录器
+│   │   ├── AuthManager.kt              # 设备代码 OAuth2 流程
+│   │   ├── DriveUploader.kt            # Google Drive 上传
+│   │   ├── MainActivity.kt             # 单按钮界面
+│   │   └── RecordingService.kt         # 音频捕获、VAD、分块
+│   └── res/                             # 图标、布局、颜色
 ├── openclaw/
-│   ├── skills/clawhark/SKILL.md         # OpenClaw skill definition
-│   └── README.md                        # OpenClaw integration guide
+│   ├── skills/clawhark/SKILL.md         # OpenClaw 技能定义
+│   └── README.md                        # OpenClaw 集成指南
 ├── scripts/
-│   ├── pull.sh                          # Pull recordings from Google Drive
-│   └── transcribe.py                    # 4-phase transcription pipeline
-├── store-listing/                       # Play Store assets
-├── icon.png                             # App icon (source)
-├── PRIVACY.md                           # Privacy policy
-├── LICENSE                              # MIT
+│   ├── pull.sh                          # 从 Google Drive 拉取录音
+│   └── transcribe.py                    # 4 阶段转录管道
+├── store-listing/                       # Play Store 资源
+├── icon.png                             # 应用图标(源文件)
+├── PRIVACY.md                           # 隐私政策
+├── LICENSE                              # MIT 许可证
 └── README.md
 ```
 
-## 🔐 Privacy & Security
+## 🔐 隐私与安全
 
-- **No servers** — audio goes watch → your Drive → your computer
-- **No analytics** — zero tracking, zero telemetry
-- **Scoped OAuth** — `drive.file` means the app can only access files it created
-- **Auto-delete chain** — watch deletes after upload, Drive deletes after pull
-- **Open source** — read every line of code yourself
+- **无服务器** — 音频路径:手表 → 你的 Drive → 你的电脑
+- **无分析** — 零追踪,零遥测
+- **权限限定的 OAuth** — `drive.file` 意味着应用只能访问自己创建的文件
+- **自动删除链** — 上传后手表删除,拉取后 Drive 删除
+- **开源** — 你可以亲自阅读每一行代码
 
-## 🤔 Why not Omi / Limitless / Bee?
+## 🤔 为什么不选 Omi / Limitless / Bee?
 
-| | ClawHark | Dedicated wearable |
+| | ClawHark | 专用可穿戴设备 |
 |---|---|---|
-| **Hardware** | Watch you already own | Extra device ($99-299) |
-| **Subscription** | Free forever | $10-24/mo |
-| **Data** | Your Drive, your computer | Their cloud |
-| **Transcription** | Your choice (Whisper, AssemblyAI, etc.) | Their pipeline |
-| **Customizable** | Fully open source | Closed |
-| **AI integration** | Any (OpenClaw, ChatGPT, Claude...) | Their app only |
+| **硬件** | 你已拥有的手表 | 额外设备($99-299) |
+| **订阅** | 永久免费 | $10-24/月 |
+| **数据** | 你的 Drive,你的电脑 | 他们的云 |
+| **转录** | 你的选择(Whisper、AssemblyAI 等) | 他们的管道 |
+| **可定制性** | 完全开源 | 闭源 |
+| **AI 集成** | 任意(OpenClaw、ChatGPT、Claude...) | 仅他们的应用 |
 
-## 🤝 Contributing
+## 🤝 贡献
 
-PRs welcome. The app is intentionally simple — a few hundred lines of Kotlin.
+欢迎提交 PR。这个应用有意保持简单——只有几百行 Kotlin 代码。
 
-**Good first contributions:**
-- Support for more watches (Galaxy Watch, TicWatch)
-- Alternative upload backends (S3, WebDAV, local WiFi)
-- On-device transcription (Whisper on Wear OS)
-- Better VAD algorithms
-- Companion phone app for easier setup
+**适合新手的贡献方向:**
+- 支持更多手表(Galaxy Watch、TicWatch)
+- 替代上传后端(S3、WebDAV、本地 WiFi)
+- 设备端转录(Wear OS 上的 Whisper)
+- 更好的 VAD 算法
+- 更易设置的配套手机应用
 
-## 📄 License
+## 📄 许可证
 
-[MIT](LICENSE) — do whatever you want with it.
+[MIT](LICENSE) — 你可以随意使用。
