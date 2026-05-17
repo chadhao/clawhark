@@ -6,59 +6,74 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
-import android.app.Activity
-import android.view.HapticFeedbackConstants
-import android.view.View
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
-
+import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.material.*
+import androidx.work.WorkManager
+import androidx.work.OneTimeWorkRequestBuilder
 import kotlinx.coroutines.*
+import java.io.File
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
 
     private var service: RecordingService? = null
     private var bound = false
     private var bindRequested = false
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    // Recording views
-    private lateinit var recordGroup: LinearLayout
-    private lateinit var toggleBtn: Button
-    private lateinit var statusText: TextView
-    private lateinit var infoText: TextView
-
-    // Auth views
-    private lateinit var authGroup: LinearLayout
-    private lateinit var authTitle: TextView
-    private lateinit var authStatus: TextView
-    private lateinit var authCode: TextView
-    private lateinit var authBtn: Button
-
     private var authPollingJob: Job? = null
 
-    // Double-tap protection
     private var lastToggleTime = 0L
     private var lastAuthTapTime = 0L
 
-    // Stop confirmation (two-tap)
     private var confirmPending = false
     private var confirmResetJob: Job? = null
 
-    // Auth polling animation
     private var dotCount = 0
+
+    private var uiState by mutableStateOf(UIState())
 
     private companion object {
         const val DEBOUNCE_MS = 600L
         const val CONFIRM_TIMEOUT_MS = 3000L
     }
+
+    data class UIState(
+        val isAuthenticated: Boolean = false,
+        val isRecording: Boolean = false,
+        val statusText: String = "已停止",
+        val statusColor: Color = Color(0xFF888888),
+        val infoText: String = "点击开始录音",
+        val authTitle: String = "关联Google Drive",
+        val authStatus: String = "点击关联按钮连接\n你的Google Drive",
+        val authCode: String? = null,
+        val authBtnText: String = "关联",
+        val authBtnEnabled: Boolean = true,
+        val storageInfo: String = "Drive",
+        val confirmPending: Boolean = false,
+        val uploadStatus: String = ""
+    )
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -76,52 +91,35 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
 
         AppLog.init(this)
         AuthManager.init(this)
 
-        // Recording views
-        recordGroup = findViewById(R.id.recordGroup)
-        toggleBtn = findViewById(R.id.toggleBtn)
-        statusText = findViewById(R.id.statusText)
-        infoText = findViewById(R.id.infoText)
+        checkPermissions()
+        updateUIState()
 
-        // Auth views
-        authGroup = findViewById(R.id.authGroup)
-        authTitle = findViewById(R.id.authTitle)
-        authStatus = findViewById(R.id.authStatus)
-        authCode = findViewById(R.id.authCode)
-        authBtn = findViewById(R.id.authBtn)
-
-        toggleBtn.setOnClickListener {
-            val now = System.currentTimeMillis()
-            if (now - lastToggleTime < DEBOUNCE_MS) return@setOnClickListener
-            lastToggleTime = now
-            it.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-            if (checkPermissions()) {
-                toggle()
+        setContent {
+            MaterialTheme(
+                colors = Colors(
+                    primary = Color(0xFFAA6639),
+                    primaryVariant = Color(0xFF885028),
+                    secondary = Color(0xFFAA6639),
+                    secondaryVariant = Color(0xFF885028),
+                    background = Color(0xFF000000),
+                    surface = Color(0xFF1A1A1A),
+                    error = Color(0xFFCC3333),
+                    onPrimary = Color.White,
+                    onSecondary = Color.White,
+                    onBackground = Color.White,
+                    onSurface = Color.White,
+                    onSurfaceVariant = Color(0xFFBBBBBB),
+                    onError = Color.White
+                )
+            ) {
+                MainScreen()
             }
         }
 
-        // Long press on toggle to sign out
-        toggleBtn.setOnLongClickListener {
-            it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            signOut()
-            true
-        }
-
-        authBtn.setOnClickListener {
-            val now = System.currentTimeMillis()
-            if (now - lastAuthTapTime < DEBOUNCE_MS) return@setOnClickListener
-            lastAuthTapTime = now
-            startDeviceCodeFlow()
-        }
-
-        checkPermissions()
-        showCorrectScreen()
-
-        // Update UI periodically
         scope.launch {
             while (isActive) {
                 updateUI()
@@ -156,6 +154,160 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    @Composable
+    fun MainScreen() {
+        val listState = rememberScalingLazyListState()
+        
+        Scaffold(
+            timeText = { TimeText() }
+        ) {
+            ScalingLazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF000000)),
+                contentPadding = PaddingValues(
+                    top = 32.dp,
+                    start = 10.dp,
+                    end = 10.dp,
+                    bottom = 32.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                state = listState
+            ) {
+                if (uiState.isAuthenticated) {
+                    item { RecordingScreen() }
+                } else {
+                    item { AuthScreen() }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun RecordingScreen() {
+        val haptic = LocalHapticFeedback.current
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = uiState.statusText,
+                color = uiState.statusColor,
+                style = MaterialTheme.typography.body1,
+                textAlign = TextAlign.Center
+            )
+
+            Button(
+                onClick = {
+                    val now = System.currentTimeMillis()
+                    if (now - lastToggleTime < DEBOUNCE_MS) return@Button
+                    lastToggleTime = now
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (checkPermissions()) {
+                        toggle()
+                    }
+                },
+                modifier = Modifier.size(100.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = if (uiState.isRecording) Color(0xFFCC3333) else Color(0xFFAA6639)
+                )
+            ) {
+                Text(
+                    text = if (uiState.confirmPending) "确定?" else if (uiState.isRecording) "停止" else "开始",
+                    style = MaterialTheme.typography.button
+                )
+            }
+
+            Text(
+                text = uiState.infoText,
+                color = Color(0xFFBBBBBB),
+                style = MaterialTheme.typography.caption1,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = { manualUploadAll() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF444444))
+            ) {
+                Text("手动上传全部", style = MaterialTheme.typography.caption1)
+            }
+
+            if (uiState.uploadStatus.isNotEmpty()) {
+                Text(
+                    text = uiState.uploadStatus,
+                    color = Color(0xFF88CC88),
+                    style = MaterialTheme.typography.caption2,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            Button(
+                onClick = { checkConnection() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF444444))
+            ) {
+                Text("检查WiFi连接", style = MaterialTheme.typography.caption1)
+            }
+        }
+    }
+
+    @Composable
+    fun AuthScreen() {
+        val haptic = LocalHapticFeedback.current
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = uiState.authTitle,
+                color = Color.White,
+                style = MaterialTheme.typography.title3,
+                textAlign = TextAlign.Center
+            )
+
+            Text(
+                text = uiState.authStatus,
+                color = Color(0xFFBBBBBB),
+                style = MaterialTheme.typography.body2,
+                textAlign = TextAlign.Center
+            )
+
+            uiState.authCode?.let { code ->
+                Text(
+                    text = code,
+                    color = Color.White,
+                    style = MaterialTheme.typography.title1,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            Button(
+                onClick = {
+                    val now = System.currentTimeMillis()
+                    if (now - lastAuthTapTime < DEBOUNCE_MS) return@Button
+                    lastAuthTapTime = now
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    startDeviceCodeFlow()
+                },
+                enabled = uiState.authBtnEnabled,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(text = uiState.authBtnText)
+            }
+        }
+    }
+
     private fun doBind(intent: Intent) {
         if (!bindRequested) {
             bindService(intent, connection, Context.BIND_AUTO_CREATE)
@@ -172,33 +324,14 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showCorrectScreen() {
+    private fun updateUIState() {
         val storageConfig = AuthManager.getStorageConfig()
         val storageType = storageConfig?.storageType ?: StorageType.GOOGLE_DRIVE
-        
-        if (AuthManager.isAuthenticated()) {
-            authGroup.visibility = View.GONE
-            recordGroup.visibility = View.VISIBLE
-        } else {
-            recordGroup.visibility = View.GONE
-            authGroup.visibility = View.VISIBLE
-            
-            // 根据存储类型显示不同的认证提示
-            when (storageType) {
-                StorageType.GOOGLE_DRIVE -> {
-                    authStatus.text = "点击关联按钮连接\n你的Google Drive"
-                    authCode.visibility = View.GONE
-                }
-                StorageType.S3 -> {
-                    // S3 不需要 OAuth 流程,直接显示已配置
-                    authGroup.visibility = View.GONE
-                    recordGroup.visibility = View.VISIBLE
-                }
-            }
-        }
-    }
 
-    // ─── Sign Out ─────────────────────────────────────────────────────────
+        uiState = uiState.copy(
+            isAuthenticated = AuthManager.isAuthenticated() || storageType == StorageType.S3
+        )
+    }
 
     private fun signOut() {
         val svc = service
@@ -210,79 +343,84 @@ class MainActivity : Activity() {
         }
         AuthManager.clearAuth()
         Toast.makeText(this, "已退出", Toast.LENGTH_SHORT).show()
-        showCorrectScreen()
+        updateUIState()
     }
 
-    // ─── Device Code Auth Flow ───────────────────────────────────────────
-
     private fun startDeviceCodeFlow() {
-        authBtn.isEnabled = false
-        authBtn.text = "..."
-        authStatus.text = "正在请求代码..."
-        authCode.visibility = View.GONE
+        uiState = uiState.copy(
+            authBtnEnabled = false,
+            authBtnText = "...",
+            authStatus = "正在请求代码...",
+            authCode = null
+        )
 
         scope.launch {
             val response = AuthManager.requestDeviceCode()
             if (response == null) {
-                authBtn.isEnabled = true
-                authBtn.text = "重试"
-                authStatus.text = "连接失败\n检查WiFi后重试"
+                uiState = uiState.copy(
+                    authBtnEnabled = true,
+                    authBtnText = "重试",
+                    authStatus = "连接失败\n检查WiFi后重试"
+                )
                 return@launch
             }
 
-            // Show the user code prominently
-            authTitle.text = "在此网址输入代码"
-            authStatus.text = "google.com/device"
-            authCode.text = response.userCode
-            authCode.visibility = View.VISIBLE
-            authBtn.text = "等待中"
+            uiState = uiState.copy(
+                authTitle = "在此网址输入代码",
+                authStatus = "google.com/device",
+                authCode = response.userCode,
+                authBtnText = "等待中"
+            )
             dotCount = 0
 
-            // Poll for authorization
             val interval = maxOf(response.interval, 5) * 1000L
             authPollingJob = scope.launch pollLoop@{
                 while (isActive) {
                     delay(interval)
-                    // Animate dots while polling
                     dotCount = (dotCount + 1) % 4
-                    authBtn.text = "等待中" + ".".repeat(dotCount)
+                    uiState = uiState.copy(authBtnText = "等待中" + ".".repeat(dotCount))
 
                     val result = AuthManager.pollForAuthorization(response.deviceCode)
                     when (result) {
                         is AuthManager.PollResult.Success -> {
                             getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
                                 .edit().putBoolean(RecordingService.PREF_SHOULD_RECORD, true).apply()
-                            authTitle.text = "已连接"
-                            authStatus.text = ""
-                            authCode.visibility = View.GONE
-                            authBtn.text = "确定"
+                            uiState = uiState.copy(
+                                authTitle = "已连接",
+                                authStatus = "",
+                                authCode = null,
+                                authBtnText = "确定"
+                            )
                             delay(1500)
-                            showCorrectScreen()
+                            updateUIState()
                             val intent = Intent(this@MainActivity, RecordingService::class.java)
                             startForegroundService(intent)
                             doBind(intent)
                             return@pollLoop
                         }
                         is AuthManager.PollResult.Pending -> {
-                            // Keep waiting — dots already animated above
                         }
                         is AuthManager.PollResult.SlowDown -> {
                             delay(5000)
                         }
                         is AuthManager.PollResult.Expired -> {
-                            authTitle.text = "关联Google Drive"
-                            authStatus.text = "代码已过期\n点击重试"
-                            authCode.visibility = View.GONE
-                            authBtn.isEnabled = true
-                            authBtn.text = "重试"
+                            uiState = uiState.copy(
+                                authTitle = "关联Google Drive",
+                                authStatus = "代码已过期\n点击重试",
+                                authCode = null,
+                                authBtnEnabled = true,
+                                authBtnText = "重试"
+                            )
                             return@pollLoop
                         }
                         is AuthManager.PollResult.Error -> {
-                            authTitle.text = "关联Google Drive"
-                            authStatus.text = "错误: ${result.message}\n点击重试"
-                            authCode.visibility = View.GONE
-                            authBtn.isEnabled = true
-                            authBtn.text = "重试"
+                            uiState = uiState.copy(
+                                authTitle = "关联Google Drive",
+                                authStatus = "错误: ${result.message}\n点击重试",
+                                authCode = null,
+                                authBtnEnabled = true,
+                                authBtnText = "重试"
+                            )
                             return@pollLoop
                         }
                     }
@@ -291,13 +429,92 @@ class MainActivity : Activity() {
         }
     }
 
-    // ─── Recording Controls ──────────────────────────────────────────────
+    private fun manualUploadAll() {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val recordingsDir = getExternalFilesDir(null)?.resolve("recordings")
+                if (recordingsDir == null || !recordingsDir.exists()) {
+                    withContext(Dispatchers.Main) {
+                        uiState = uiState.copy(uploadStatus = "无录音文件")
+                    }
+                    return@launch
+                }
+
+                val files = recordingsDir.listFiles()?.filter { 
+                    it.isFile && it.name.endsWith(".m4a") && !it.name.endsWith(".uploading")
+                } ?: emptyList()
+
+                if (files.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        uiState = uiState.copy(uploadStatus = "无待上传文件")
+                    }
+                    return@launch
+                }
+
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(uploadStatus = "上传中: 0/${files.size}")
+                }
+
+                var uploaded = 0
+                val uploadRequest = OneTimeWorkRequestBuilder<UploadWorker>().build()
+                WorkManager.getInstance(this@MainActivity).enqueue(uploadRequest)
+
+                files.forEachIndexed { index, _ ->
+                    delay(500)
+                    uploaded = index + 1
+                    withContext(Dispatchers.Main) {
+                        uiState = uiState.copy(uploadStatus = "上传中: $uploaded/${files.size}")
+                    }
+                }
+
+                delay(1000)
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(uploadStatus = "已加入上传队列")
+                }
+                delay(3000)
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(uploadStatus = "")
+                }
+
+            } catch (e: Exception) {
+                AppLog.e("Upload", "Manual upload failed", e)
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(uploadStatus = "上传失败")
+                    Toast.makeText(this@MainActivity, "上传失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun checkConnection() {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                val network = connectivityManager.activeNetwork
+                val capabilities = connectivityManager.getNetworkCapabilities(network)
+                
+                val hasWifi = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                
+                withContext(Dispatchers.Main) {
+                    if (hasWifi) {
+                        Toast.makeText(this@MainActivity, "WiFi已连接", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "未连接WiFi", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                AppLog.e("Connection", "Check failed", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "连接检查失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     private fun toggle() {
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
         val svc = service
         if (svc == null || !svc.isCurrentlyRecording()) {
-            // Start recording — clear any pending stop confirmation
             confirmPending = false
             confirmResetJob?.cancel()
             prefs.edit().putBoolean(RecordingService.PREF_SHOULD_RECORD, true).apply()
@@ -305,12 +522,12 @@ class MainActivity : Activity() {
             startForegroundService(intent)
             doBind(intent)
         } else {
-            // Stop recording — require two taps for confirmation
             if (!confirmPending) {
                 confirmPending = true
-                toggleBtn.text = "确定?"
-                statusText.text = "再次点击停止"
-                toggleBtn.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                uiState = uiState.copy(
+                    statusText = "再次点击停止",
+                    confirmPending = true
+                )
                 confirmResetJob = scope.launch {
                     delay(CONFIRM_TIMEOUT_MS)
                     confirmPending = false
@@ -318,7 +535,6 @@ class MainActivity : Activity() {
                 }
                 return
             }
-            // Second tap — actually stop
             confirmPending = false
             confirmResetJob?.cancel()
             prefs.edit().putBoolean(RecordingService.PREF_SHOULD_RECORD, false).apply()
@@ -331,7 +547,10 @@ class MainActivity : Activity() {
     }
 
     private fun updateUI() {
-        if (!AuthManager.isAuthenticated()) return
+        if (!AuthManager.isAuthenticated()) {
+            updateUIState()
+            return
+        }
 
         val storageConfig = AuthManager.getStorageConfig()
         val storageInfo = when (storageConfig?.storageType) {
@@ -342,14 +561,6 @@ class MainActivity : Activity() {
 
         val svc = service
         if (svc != null && svc.isCurrentlyRecording()) {
-            // 录音状态 — 红色按钮
-            toggleBtn.setBackgroundResource(R.drawable.circle_button_recording)
-            if (!confirmPending) {
-                statusText.text = "录音中"
-                statusText.setTextColor(0xFFCC3333.toInt())
-                toggleBtn.text = "停止"
-            }
-
             val elapsed = System.currentTimeMillis() - svc.recordingStartTime
             val mins = (elapsed / 60000).toInt()
             val hrs = mins / 60
@@ -357,19 +568,25 @@ class MainActivity : Activity() {
             val chunks = svc.totalChunks
             val mb = String.format("%.1f", svc.getStorageUsed() / 1024.0 / 1024.0)
 
-            infoText.text = "${hrs}小时 ${m}分钟 | ${chunks} 片段\n${mb} MB | $storageInfo"
+            uiState = uiState.copy(
+                isRecording = true,
+                statusText = if (!confirmPending) "录音中" else "再次点击停止",
+                statusColor = Color(0xFFCC3333),
+                infoText = "${hrs}小时 ${m}分钟 | ${chunks} 片段\n${mb} MB | $storageInfo",
+                storageInfo = storageInfo
+            )
         } else {
-            // 停止状态 — 默认按钮
-            toggleBtn.setBackgroundResource(R.drawable.circle_button)
             confirmPending = false
-            statusText.text = "已停止"
-            statusText.setTextColor(0xFF888888.toInt())
-            toggleBtn.text = "开始"
-            infoText.text = "点击录音\n长按退出登录"
+            uiState = uiState.copy(
+                isRecording = false,
+                statusText = "已停止",
+                statusColor = Color(0xFF888888),
+                infoText = "点击开始录音",
+                confirmPending = false,
+                storageInfo = storageInfo
+            )
         }
     }
-
-    // ─── Battery Exemption ─────────────────────────────────────────────
 
     private fun requestBatteryExemption() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager

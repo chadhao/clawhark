@@ -84,16 +84,16 @@ class RecordingService : Service() {
         const val CHUNK_DURATION_MS = 15 * 60 * 1000L
         
         // 语音活动检测阈值: 500 (低于此值视为静音)
-        const val VAD_THRESHOLD = 500
+        const val VAD_THRESHOLD = 600
         
         // 静音超时: 3秒 (超过3秒静音则停止录音)
         const val VAD_SILENCE_TIMEOUT_MS = 3000L
         
         // AAC 编码比特率: 32kbps (适合语音,节省存储空间)
-        const val AAC_BIT_RATE = 48000
+        const val AAC_BIT_RATE = 32000
         
         // 音频读取缓冲区大小: 8192 采样点 (约512ms,减少CPU唤醒次数)
-        const val READ_BUFFER_SAMPLES = 8192
+        const val READ_BUFFER_SAMPLES = 16384
         
         // 上传间隔: 60分钟 (调试模式,生产环境建议 60L)
         const val UPLOAD_INTERVAL_MINUTES = 60L
@@ -105,8 +105,8 @@ class RecordingService : Service() {
         const val UPLOAD_FALLBACK_WORK_NAME = "upload_fallback"
         
         // 状态日志输出间隔: 5分钟
-        const val STATUS_LOG_INTERVAL_MS = 300_000L
-        // const val STATUS_LOG_INTERVAL_MS = 600_00L
+        const val STATUS_LOG_INTERVAL_MS = 3600_000L
+
         // 最小可用空间: 50MB (低于此值停止录音)
         const val MIN_FREE_SPACE_BYTES = 50 * 1024 * 1024L
         
@@ -354,8 +354,6 @@ class RecordingService : Service() {
         // Schedule periodic uploads via WorkManager
         scheduleUploads()
         
-        // 调试: 启动后立即触发一次上传测试
-        triggerImmediateUpload()
 
         // Periodic status logger
         scope.launch {
@@ -776,9 +774,9 @@ class RecordingService : Service() {
     private fun scheduleUploads() {
         val wm = WorkManager.getInstance(this)
 
-        // 主要上传任务: 任何网络上传(包括蓝牙代理)
+        // 主要上传任务: 仅WiFi上传
         val uploadConstraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)  // 任何网络
+            .setRequiredNetworkType(NetworkType.UNMETERED)  // 仅WiFi
             .build()
         val uploadWork = PeriodicWorkRequestBuilder<UploadWorker>(
             UPLOAD_INTERVAL_MINUTES, TimeUnit.MINUTES
@@ -789,20 +787,20 @@ class RecordingService : Service() {
             uploadWork
         )
 
-        // 备用上传任务: 任何网络 (每 4 小时) — 处理蓝牙代理等特殊情况
-        val anyNetConstraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
+        // 备用上传任务: 仅WiFi (每 4 小时)
+        val fallbackConstraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.UNMETERED)  // 仅WiFi
             .build()
         val fallbackWork = PeriodicWorkRequestBuilder<UploadWorker>(
             UPLOAD_FALLBACK_INTERVAL_HOURS, TimeUnit.HOURS
-        ).setConstraints(anyNetConstraints).build()
+        ).setConstraints(fallbackConstraints).build()
         wm.enqueueUniquePeriodicWork(
             UPLOAD_FALLBACK_WORK_NAME,
             ExistingPeriodicWorkPolicy.UPDATE,
             fallbackWork
         )
 
-        AppLog.i(TAG, "上传已调度: 每 ${UPLOAD_INTERVAL_MINUTES}分钟 (任何网络) + 每 ${UPLOAD_FALLBACK_INTERVAL_HOURS}小时 (备用)")
+        AppLog.i(TAG, "上传已调度: 每 ${UPLOAD_INTERVAL_MINUTES}分钟 (仅WiFi) + 每 ${UPLOAD_FALLBACK_INTERVAL_HOURS}小时 (备用WiFi)")
     }
 
     private fun triggerImmediateUpload() {
