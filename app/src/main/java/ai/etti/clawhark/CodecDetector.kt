@@ -189,21 +189,26 @@ object CodecDetector {
         
         AppLog.i(TAG, "")
         AppLog.i(TAG, "========== 当前应用配置 ==========")
-        AppLog.i(TAG, "  使用编码: AAC (${MediaFormat.MIMETYPE_AUDIO_AAC})")
+        AppLog.i(TAG, "  使用编码: Opus (${MediaFormat.MIMETYPE_AUDIO_OPUS})")
         AppLog.i(TAG, "  采样率: ${AudioRecorder.SAMPLE_RATE} Hz")
-        AppLog.i(TAG, "  码率: ${AudioRecorder.AAC_BIT_RATE/1000} kbps")
+        AppLog.i(TAG, "  码率: ${AudioRecorder.OPUS_BIT_RATE/1000} kbps")
+        
+        if (opusEncoders.isEmpty()) {
+            AppLog.w(TAG, "  ✗ 设备不支持Opus编码器")
+        } else {
+            val opusHw = opusEncoders.any { it.isHardwareAccelerated }
+            if (opusHw) {
+                AppLog.i(TAG, "  ✓ Opus硬件加速可用")
+            } else {
+                AppLog.i(TAG, "  ✓ 设备支持Opus编码器（软件编码）")
+            }
+        }
         
         val currentAacHw = aacEncoders.any { it.isHardwareAccelerated }
         if (currentAacHw) {
-            AppLog.i(TAG, "  ✓ AAC硬件加速可用")
+            AppLog.i(TAG, "  注: AAC硬件加速可用（未使用）")
         } else {
-            AppLog.w(TAG, "  ✗ AAC硬件加速不可用，使用软件编码")
-        }
-        
-        if (opusEncoders.isEmpty()) {
-            AppLog.i(TAG, "  ✗ 设备不支持Opus编码器（需要第三方库支持）")
-        } else {
-            AppLog.i(TAG, "  ✓ 设备支持Opus编码器")
+            AppLog.i(TAG, "  注: AAC仅软件编码可用（未使用）")
         }
     }
     

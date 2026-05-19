@@ -481,7 +481,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val files = recordingsDir.listFiles()?.filter { 
-                    it.isFile && it.name.endsWith(".m4a") && !it.name.endsWith(".uploading")
+                    it.isFile && it.name.endsWith(".opus") && !it.name.endsWith(".uploading")
                 } ?: emptyList()
 
                 if (files.isEmpty()) {
@@ -619,7 +619,7 @@ class MainActivity : ComponentActivity() {
         val recordingsDir = File(filesDir, "recordings")
         val localFileCount = if (recordingsDir.exists()) {
             recordingsDir.listFiles()?.count { 
-                it.isFile && it.name.endsWith(".m4a")
+                it.isFile && it.name.endsWith(".opus")
             } ?: 0
         } else {
             0
@@ -645,7 +645,7 @@ class MainActivity : ComponentActivity() {
             confirmPending = false
             val mb = if (recordingsDir.exists()) {
                 val totalSize = recordingsDir.listFiles()?.filter { 
-                    it.isFile && it.name.endsWith(".m4a")
+                    it.isFile && it.name.endsWith(".opus")
                 }?.sumOf { it.length() } ?: 0L
                 String.format("%.1f", totalSize / 1024.0 / 1024.0)
             } else {

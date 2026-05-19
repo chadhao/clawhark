@@ -31,8 +31,8 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             return Result.success()
         }
 
-        // 只上传 .m4a 文件(不上传仍在写入的 .tmp 文件)
-        val files = dir.listFiles()?.filter { it.extension == "m4a" }?.sortedBy { it.name } ?: emptyList()
+        // 只上传 .opus 文件(不上传仍在写入的 .tmp 文件)
+        val files = dir.listFiles()?.filter { it.extension == "opus" }?.sortedBy { it.name } ?: emptyList()
         if (files.isEmpty()) {
             AppLog.d(TAG, "没有文件需要上传")
             return Result.success()

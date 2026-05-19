@@ -69,7 +69,7 @@ class RecordingService : Service() {
         AppLog.i(TAG, "设备: ${android.os.Build.MODEL} (${android.os.Build.DEVICE})")
         AppLog.i(TAG, "Android: ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
         AppLog.i(TAG, "模式: ${if (config.isDebugMode) "调试" else "生产"}")
-        AppLog.i(TAG, "Codec: AAC ${AudioRecorder.AAC_BIT_RATE/1000}kbps | Chunk: ${config.chunkDurationMs/60000}min | Upload: every ${config.uploadIntervalMinutes}min")
+        AppLog.i(TAG, "Codec: Opus ${AudioRecorder.OPUS_BIT_RATE/1000}kbps | Chunk: ${config.chunkDurationMs/60000}min | Upload: every ${config.uploadIntervalMinutes}min")
         
         // 调试模式输出编码器信息
         if (config.isDebugMode) {
