@@ -219,7 +219,7 @@ adb pair <watch-ip>:<pairing-port>
 
 # 连接手表（无线调试）
 adb connect <watch-ip>:<port>
-# 示例: adb connect 192.168.1.100:5555
+# 示例: adb connect 192.168.0.42:35319
 
 # 查看已连接的设备
 adb devices
