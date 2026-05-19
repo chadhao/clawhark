@@ -80,51 +80,119 @@ class RecordingService : Service() {
         // 音频采样率: 16kHz (语音识别标准采样率)
         const val SAMPLE_RATE = 16000
         
-        // 音频块时长: 15分钟 (每个录音文件的时长)
-        const val CHUNK_DURATION_MS = 15 * 60 * 1000L
-        
-        // 语音活动检测阈值: 500 (低于此值视为静音)
-        const val VAD_THRESHOLD = 600
-        
-        // 静音超时: 3秒 (超过3秒静音则停止录音)
-        const val VAD_SILENCE_TIMEOUT_MS = 3000L
-        
         // AAC 编码比特率: 32kbps (适合语音,节省存储空间)
         const val AAC_BIT_RATE = 32000
         
-        // 音频读取缓冲区大小: 8192 采样点 (约512ms,减少CPU唤醒次数)
+        // 音频读取缓冲区大小: 16384 采样点 (约1秒,减少CPU唤醒次数)
         const val READ_BUFFER_SAMPLES = 16384
-        
-        // 上传间隔: 60分钟 (调试模式,生产环境建议 60L)
-        const val UPLOAD_INTERVAL_MINUTES = 60L
-        
-        // 备用上传间隔: 4小时 (定期上传任务的后备机制)
-        const val UPLOAD_FALLBACK_INTERVAL_HOURS = 4L
-        
-        // 备用上传任务名称
-        const val UPLOAD_FALLBACK_WORK_NAME = "upload_fallback"
-        
-        // 状态日志输出间隔: 5分钟
-        const val STATUS_LOG_INTERVAL_MS = 3600_000L
-
-        // 最小可用空间: 50MB (低于此值停止录音)
-        const val MIN_FREE_SPACE_BYTES = 50 * 1024 * 1024L
-        
-        // 本地存储上限: 500MB (超过则删除最旧的文件)
-        const val MAX_LOCAL_STORAGE_BYTES = 500 * 1024 * 1024L
         
         // 麦克风恢复最大重试次数: 5次
         const val MIC_RECOVERY_MAX_RETRIES = 5
         
-        // 过时临时文件阈值: 20分钟 (超过此时间的.tmp文件视为完整文件)
-        const val STALE_TMP_THRESHOLD_MS = 20 * 60 * 1000L
-        // const val STALE_TMP_THRESHOLD_MS = 2 * 60 * 1000L
-
         // SharedPreferences 键名 (与 MainActivity 共享)
         const val PREF_FILE = "clawhark"
         const val PREF_SHOULD_RECORD = "should_record"
+        const val PREF_DEBUG_MODE = "debug_mode"
         const val ACTION_STOP = "STOP"
+        
+        // 备用上传任务名称
+        const val UPLOAD_FALLBACK_WORK_NAME = "upload_fallback"
+        
+        // ========== 生产环境配置 ==========
+        // 音频块时长: 15分钟 (每个录音文件的时长)
+        private const val CHUNK_DURATION_MS_PROD = 15 * 60 * 1000L
+        // 语音活动检测阈值: 600 (低于此值视为静音)
+        private const val VAD_THRESHOLD_PROD = 600
+        // 静音超时: 3秒 (超过3秒静音则停止录音)
+        private const val VAD_SILENCE_TIMEOUT_MS_PROD = 3000L
+        // 上传间隔: 60分钟
+        private const val UPLOAD_INTERVAL_MINUTES_PROD = 60L
+        // 备用上传间隔: 4小时 (定期上传任务的后备机制)
+        private const val UPLOAD_FALLBACK_INTERVAL_HOURS_PROD = 4L
+        // 状态日志输出间隔: 1小时
+        private const val STATUS_LOG_INTERVAL_MS_PROD = 3600_000L
+        // 最小可用空间: 50MB (低于此值停止录音)
+        private const val MIN_FREE_SPACE_BYTES_PROD = 50 * 1024 * 1024L
+        // 本地存储上限: 500MB (超过则删除最旧的文件)
+        private const val MAX_LOCAL_STORAGE_BYTES_PROD = 500 * 1024 * 1024L
+        // 过时临时文件阈值: 20分钟 (超过此时间的.tmp文件视为完整文件)
+        private const val STALE_TMP_THRESHOLD_MS_PROD = 20 * 60 * 1000L
+        
+        // ========== 调试模式配置 ==========
+        // 音频块时长: 2分钟 (快速生成文件)
+        private const val CHUNK_DURATION_MS_DEBUG = 2 * 60 * 1000L
+        // 语音活动检测阈值: 600 (与生产环境相同)
+        private const val VAD_THRESHOLD_DEBUG = 0
+        // 静音超时: 3秒 (与生产环境相同)
+        private const val VAD_SILENCE_TIMEOUT_MS_DEBUG = 3000L
+        // 上传间隔: 5分钟 (快速测试上传)
+        private const val UPLOAD_INTERVAL_MINUTES_DEBUG = 15L
+        // 备用上传间隔: 15分钟 (快速测试备用上传)
+        private const val UPLOAD_FALLBACK_INTERVAL_HOURS_DEBUG = 0L
+        private const val UPLOAD_FALLBACK_INTERVAL_MINUTES_DEBUG = 30L
+        // 状态日志输出间隔: 10分钟 (更频繁的日志)
+        private const val STATUS_LOG_INTERVAL_MS_DEBUG = 10 * 60_000L
+        // 最小可用空间: 10MB (更宽松的限制)
+        private const val MIN_FREE_SPACE_BYTES_DEBUG = 10 * 1024 * 1024L
+        // 本地存储上限: 100MB (更小的存储上限)
+        private const val MAX_LOCAL_STORAGE_BYTES_DEBUG = 100 * 1024 * 1024L
+        // 过时临时文件阈值: 5分钟 (更快的清理)
+        private const val STALE_TMP_THRESHOLD_MS_DEBUG = 5 * 60 * 1000L
+        
+        // ========== 动态配置读取方法 ==========
+        // 根据调试模式返回相应的配置值
+        private fun getConfig(context: Context): Config {
+            val isDebugMode = context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+                .getBoolean(PREF_DEBUG_MODE, false)
+            return if (isDebugMode) {
+                Config(
+                    chunkDurationMs = CHUNK_DURATION_MS_DEBUG,
+                    vadThreshold = VAD_THRESHOLD_DEBUG,
+                    vadSilenceTimeoutMs = VAD_SILENCE_TIMEOUT_MS_DEBUG,
+                    uploadIntervalMinutes = UPLOAD_INTERVAL_MINUTES_DEBUG,
+                    uploadFallbackIntervalHours = UPLOAD_FALLBACK_INTERVAL_HOURS_DEBUG,
+                    uploadFallbackIntervalMinutes = UPLOAD_FALLBACK_INTERVAL_MINUTES_DEBUG,
+                    statusLogIntervalMs = STATUS_LOG_INTERVAL_MS_DEBUG,
+                    minFreeSpaceBytes = MIN_FREE_SPACE_BYTES_DEBUG,
+                    maxLocalStorageBytes = MAX_LOCAL_STORAGE_BYTES_DEBUG,
+                    staleTmpThresholdMs = STALE_TMP_THRESHOLD_MS_DEBUG,
+                    isDebugMode = true
+                )
+            } else {
+                Config(
+                    chunkDurationMs = CHUNK_DURATION_MS_PROD,
+                    vadThreshold = VAD_THRESHOLD_PROD,
+                    vadSilenceTimeoutMs = VAD_SILENCE_TIMEOUT_MS_PROD,
+                    uploadIntervalMinutes = UPLOAD_INTERVAL_MINUTES_PROD,
+                    uploadFallbackIntervalHours = UPLOAD_FALLBACK_INTERVAL_HOURS_PROD,
+                    uploadFallbackIntervalMinutes = 0L,
+                    statusLogIntervalMs = STATUS_LOG_INTERVAL_MS_PROD,
+                    minFreeSpaceBytes = MIN_FREE_SPACE_BYTES_PROD,
+                    maxLocalStorageBytes = MAX_LOCAL_STORAGE_BYTES_PROD,
+                    staleTmpThresholdMs = STALE_TMP_THRESHOLD_MS_PROD,
+                    isDebugMode = false
+                )
+            }
+        }
     }
+    
+    // 配置数据类
+    private data class Config(
+        val chunkDurationMs: Long,
+        val vadThreshold: Int,
+        val vadSilenceTimeoutMs: Long,
+        val uploadIntervalMinutes: Long,
+        val uploadFallbackIntervalHours: Long,
+        val uploadFallbackIntervalMinutes: Long,
+        val statusLogIntervalMs: Long,
+        val minFreeSpaceBytes: Long,
+        val maxLocalStorageBytes: Long,
+        val staleTmpThresholdMs: Long,
+        val isDebugMode: Boolean
+    )
+    
+    // 当前配置实例
+    private lateinit var config: Config
 
     private val binder = LocalBinder()
     @Volatile private var audioRecord: AudioRecord? = null
@@ -164,10 +232,12 @@ class RecordingService : Service() {
     override fun onCreate() {
         super.onCreate()
         AppLog.init(this)
+        config = getConfig(this)
         AppLog.i(TAG, "=== SERVICE CREATED ===")
         AppLog.i(TAG, "Device: ${android.os.Build.MODEL} (${android.os.Build.DEVICE})")
         AppLog.i(TAG, "Android: ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
-        AppLog.i(TAG, "Codec: AAC ${AAC_BIT_RATE/1000}kbps | Chunk: ${CHUNK_DURATION_MS/60000}min | Upload: every ${UPLOAD_INTERVAL_MINUTES}min")
+        AppLog.i(TAG, "模式: ${if (config.isDebugMode) "调试" else "生产"}")
+        AppLog.i(TAG, "Codec: AAC ${AAC_BIT_RATE/1000}kbps | Chunk: ${config.chunkDurationMs/60000}min | Upload: every ${config.uploadIntervalMinutes}min")
         logBatteryStatus()
         createNotificationChannel()
     }
@@ -335,7 +405,7 @@ class RecordingService : Service() {
 
         try {
             audioRecord?.startRecording()
-            AppLog.i(TAG, "=== RECORDING STARTED === sampleRate=$SAMPLE_RATE chunkDuration=${CHUNK_DURATION_MS/1000}s vadThreshold=$VAD_THRESHOLD codec=AAC@${AAC_BIT_RATE/1000}kbps readBuf=${READ_BUFFER_SAMPLES}samples")
+            AppLog.i(TAG, "=== RECORDING STARTED === sampleRate=$SAMPLE_RATE chunkDuration=${config.chunkDurationMs/1000}s vadThreshold=${config.vadThreshold} codec=AAC@${AAC_BIT_RATE/1000}kbps readBuf=${READ_BUFFER_SAMPLES}samples")
         } catch (e: Exception) {
             AppLog.e(TAG, "FATAL: AudioRecord.startRecording() failed", e)
             isRecording = false
@@ -358,7 +428,7 @@ class RecordingService : Service() {
         // Periodic status logger
         scope.launch {
             while (isRecording) {
-                delay(STATUS_LOG_INTERVAL_MS)
+                delay(config.statusLogIntervalMs)
                 if (isRecording) logPeriodicStatus()
             }
         }
@@ -663,7 +733,7 @@ class RecordingService : Service() {
                 if (maxAmplitude > maxAmplSinceLastLog) maxAmplSinceLastLog = maxAmplitude
                 val now = System.currentTimeMillis()
 
-                if (maxAmplitude > VAD_THRESHOLD) {
+                if (maxAmplitude > config.vadThreshold) {
                     lastVoiceTime = now
                     hasVoiceInChunk = true
                     voiceReadsSinceLastLog++
@@ -672,7 +742,7 @@ class RecordingService : Service() {
                 }
 
                 val silenceDuration = now - lastVoiceTime
-                if (silenceDuration < VAD_SILENCE_TIMEOUT_MS) {
+                if (silenceDuration < config.vadSilenceTimeoutMs) {
                     val pcmBytes = read * 2
                     for (i in 0 until read) {
                         pcmByteBuffer[i * 2] = (buffer[i].toInt() and 0xFF).toByte()
@@ -711,7 +781,7 @@ class RecordingService : Service() {
                     readsSinceLastLog = 0; voiceReadsSinceLastLog = 0; silenceReadsSinceLastLog = 0; maxAmplSinceLastLog = 0
                 }
 
-                if (now - chunkStartTime >= CHUNK_DURATION_MS) {
+                if (now - chunkStartTime >= config.chunkDurationMs) {
                     AppLog.i(TAG, "Chunk #$chunkNumber done (${(now - chunkStartTime)/1000}s). hasVoice=$hasVoiceInChunk pcmFed=${pcmFed/1024}KB")
 
                     val enc = encoder
@@ -779,7 +849,7 @@ class RecordingService : Service() {
             .setRequiredNetworkType(NetworkType.UNMETERED)  // 仅WiFi
             .build()
         val uploadWork = PeriodicWorkRequestBuilder<UploadWorker>(
-            UPLOAD_INTERVAL_MINUTES, TimeUnit.MINUTES
+            config.uploadIntervalMinutes, TimeUnit.MINUTES
         ).setConstraints(uploadConstraints).build()
         wm.enqueueUniquePeriodicWork(
             UploadWorker.WORK_NAME,
@@ -787,20 +857,31 @@ class RecordingService : Service() {
             uploadWork
         )
 
-        // 备用上传任务: 仅WiFi (每 4 小时)
+        // 备用上传任务: 仅WiFi
         val fallbackConstraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.UNMETERED)  // 仅WiFi
             .build()
-        val fallbackWork = PeriodicWorkRequestBuilder<UploadWorker>(
-            UPLOAD_FALLBACK_INTERVAL_HOURS, TimeUnit.HOURS
-        ).setConstraints(fallbackConstraints).build()
+        val fallbackWork = if (config.uploadFallbackIntervalHours > 0) {
+            PeriodicWorkRequestBuilder<UploadWorker>(
+                config.uploadFallbackIntervalHours, TimeUnit.HOURS
+            ).setConstraints(fallbackConstraints).build()
+        } else {
+            PeriodicWorkRequestBuilder<UploadWorker>(
+                config.uploadFallbackIntervalMinutes, TimeUnit.MINUTES
+            ).setConstraints(fallbackConstraints).build()
+        }
         wm.enqueueUniquePeriodicWork(
             UPLOAD_FALLBACK_WORK_NAME,
             ExistingPeriodicWorkPolicy.UPDATE,
             fallbackWork
         )
 
-        AppLog.i(TAG, "上传已调度: 每 ${UPLOAD_INTERVAL_MINUTES}分钟 (仅WiFi) + 每 ${UPLOAD_FALLBACK_INTERVAL_HOURS}小时 (备用WiFi)")
+        val fallbackInterval = if (config.uploadFallbackIntervalHours > 0) {
+            "${config.uploadFallbackIntervalHours}小时"
+        } else {
+            "${config.uploadFallbackIntervalMinutes}分钟"
+        }
+        AppLog.i(TAG, "上传已调度: 每 ${config.uploadIntervalMinutes}分钟 (仅WiFi) + 每 ${fallbackInterval} (备用WiFi)")
     }
 
     private fun triggerImmediateUpload() {
@@ -825,7 +906,7 @@ class RecordingService : Service() {
         AppLog.i(TAG, "  Recording: $isRecording | AudioRecord state: ${audioRecord?.state}")
         AppLog.i(TAG, "  Chunks: $totalChunks total ($chunksWithVoice voice, $chunksWithoutVoice silent)")
         AppLog.i(TAG, "  PCM encoded: ${totalBytesEncoded/1024/1024}MB | Silence skipped: ${totalSilenceSkipped/1024/1024}MB")
-        AppLog.i(TAG, "  Local files: $localFiles ($localMB MB) — uploads every ${UPLOAD_INTERVAL_MINUTES}min")
+        AppLog.i(TAG, "  Local files: $localFiles ($localMB MB) — uploads every ${config.uploadIntervalMinutes}min")
         AppLog.i(TAG, "  Read errors: $totalReadErrors")
         AppLog.i(TAG, "  WakeLock held: ${wakeLock?.isHeld}")
         AppLog.i(TAG, "  Free space: ${getChunkDir().usableSpace / 1024 / 1024}MB")
@@ -920,7 +1001,7 @@ class RecordingService : Service() {
         val tmpFiles = dir.listFiles()?.filter { it.extension == "tmp" } ?: emptyList()
         for (tmp in tmpFiles) {
             val ageMs = now - tmp.lastModified()
-            if (ageMs > STALE_TMP_THRESHOLD_MS && tmp.length() > 0) {
+            if (ageMs > config.staleTmpThresholdMs && tmp.length() > 0) {
                 // Old .tmp with data — likely a completed encode that crashed before rename.
                 // Recover by renaming to .m4a so it gets uploaded.
                 val m4aName = tmp.name.removeSuffix(".tmp")
@@ -931,7 +1012,7 @@ class RecordingService : Service() {
                     AppLog.w(TAG, "Failed to recover ${tmp.name} — deleting")
                     tmp.delete()
                 }
-            } else if (ageMs > STALE_TMP_THRESHOLD_MS) {
+            } else if (ageMs > config.staleTmpThresholdMs) {
                 // Old but empty — just delete
                 AppLog.d(TAG, "Deleting empty orphaned .tmp: ${tmp.name}")
                 tmp.delete()
@@ -947,10 +1028,10 @@ class RecordingService : Service() {
     private fun enforceStorageLimit() {
         val recordings = getRecordings()
         var totalSize = recordings.sumOf { it.length() }
-        if (totalSize <= MAX_LOCAL_STORAGE_BYTES) return
+        if (totalSize <= config.maxLocalStorageBytes) return
 
         val sorted = recordings.sortedBy { it.lastModified() }
-        val target = (MAX_LOCAL_STORAGE_BYTES * 0.8).toLong() // Shrink to 80%
+        val target = (config.maxLocalStorageBytes * 0.8).toLong() // Shrink to 80%
         for (file in sorted) {
             if (totalSize <= target) break
             val size = file.length()
@@ -962,8 +1043,8 @@ class RecordingService : Service() {
 
     private fun hasEnoughDiskSpace(): Boolean {
         val freeSpace = getChunkDir().usableSpace
-        if (freeSpace < MIN_FREE_SPACE_BYTES) {
-            AppLog.w(TAG, "Low disk space: ${freeSpace / 1024 / 1024}MB free (min ${MIN_FREE_SPACE_BYTES / 1024 / 1024}MB) — skipping encoding")
+        if (freeSpace < config.minFreeSpaceBytes) {
+            AppLog.w(TAG, "Low disk space: ${freeSpace / 1024 / 1024}MB free (min ${config.minFreeSpaceBytes / 1024 / 1024}MB) — skipping encoding")
             return false
         }
         return true

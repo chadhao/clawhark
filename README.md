@@ -263,20 +263,8 @@ adb shell am force-stop ai.etti.clawhark
 ### 日志查看
 
 ```bash
-# 查看应用日志文件（最后50行）
-adb shell "run-as ai.etti.clawhark cat files/logs/clawhark.log" | tail -50
-
-# Windows PowerShell查看日志
-adb shell "run-as ai.etti.clawhark cat files/logs/clawhark.log" | Select-Object -Last 50
-
-# 实时 logcat（过滤关键标签）
-adb logcat -s "CH.Service" "CH.Drive" "CH.Auth"
-
-# 查看所有应用日志
-adb logcat | Select-String "clawhark"
-
-# 清除logcat缓冲区
-adb logcat -c
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+adb logcat | Select-String "WR\."
 ```
 
 ### 文件系统操作

@@ -72,7 +72,8 @@ class MainActivity : ComponentActivity() {
         val authBtnEnabled: Boolean = true,
         val storageInfo: String = "Drive",
         val confirmPending: Boolean = false,
-        val uploadStatus: String = ""
+        val uploadStatus: String = "",
+        val isDebugMode: Boolean = false
     )
 
     private val connection = object : ServiceConnection {
@@ -257,6 +258,23 @@ class MainActivity : ComponentActivity() {
             ) {
                 Text("检查WiFi连接", style = MaterialTheme.typography.caption1)
             }
+
+            Button(
+                onClick = { toggleDebugMode() },
+                enabled = !uiState.isRecording,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = if (uiState.isDebugMode) Color(0xFFFFAA00) else Color(0xFF444444),
+                    disabledBackgroundColor = Color(0xFF222222)
+                )
+            ) {
+                Text(
+                    text = if (uiState.isDebugMode) "调试模式 (开)" else "调试模式 (关)",
+                    style = MaterialTheme.typography.caption1
+                )
+            }
         }
     }
 
@@ -327,9 +345,12 @@ class MainActivity : ComponentActivity() {
     private fun updateUIState() {
         val storageConfig = AuthManager.getStorageConfig()
         val storageType = storageConfig?.storageType ?: StorageType.GOOGLE_DRIVE
+        val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
+        val isDebugMode = prefs.getBoolean(RecordingService.PREF_DEBUG_MODE, false)
 
         uiState = uiState.copy(
-            isAuthenticated = AuthManager.isAuthenticated() || storageType == StorageType.S3
+            isAuthenticated = AuthManager.isAuthenticated() || storageType == StorageType.S3,
+            isDebugMode = isDebugMode
         )
     }
 
@@ -432,8 +453,8 @@ class MainActivity : ComponentActivity() {
     private fun manualUploadAll() {
         scope.launch(Dispatchers.IO) {
             try {
-                val recordingsDir = getExternalFilesDir(null)?.resolve("recordings")
-                if (recordingsDir == null || !recordingsDir.exists()) {
+                val recordingsDir = File(filesDir, "recordings")
+                if (!recordingsDir.exists()) {
                     withContext(Dispatchers.Main) {
                         uiState = uiState.copy(uploadStatus = "无录音文件")
                     }
@@ -511,6 +532,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun toggleDebugMode() {
+        val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
+        val currentDebugMode = prefs.getBoolean(RecordingService.PREF_DEBUG_MODE, false)
+        val newDebugMode = !currentDebugMode
+        
+        prefs.edit().putBoolean(RecordingService.PREF_DEBUG_MODE, newDebugMode).apply()
+        
+        uiState = uiState.copy(isDebugMode = newDebugMode)
+        
+        val modeText = if (newDebugMode) "调试模式已开启" else "调试模式已关闭"
+        Toast.makeText(this, "$modeText\n重启应用后生效", Toast.LENGTH_LONG).show()
+        
+        AppLog.i("MainActivity", "调试模式切换: $newDebugMode (需要重启)")
+    }
+
     private fun toggle() {
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
         val svc = service
@@ -559,31 +595,53 @@ class MainActivity : ComponentActivity() {
             null -> "未知"
         }
 
+        val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
+        val isDebugMode = prefs.getBoolean(RecordingService.PREF_DEBUG_MODE, false)
+
+        val recordingsDir = File(filesDir, "recordings")
+        val localFileCount = if (recordingsDir.exists()) {
+            recordingsDir.listFiles()?.count { 
+                it.isFile && it.name.endsWith(".m4a")
+            } ?: 0
+        } else {
+            0
+        }
+
         val svc = service
         if (svc != null && svc.isCurrentlyRecording()) {
             val elapsed = System.currentTimeMillis() - svc.recordingStartTime
             val mins = (elapsed / 60000).toInt()
             val hrs = mins / 60
             val m = mins % 60
-            val chunks = svc.totalChunks
             val mb = String.format("%.1f", svc.getStorageUsed() / 1024.0 / 1024.0)
 
             uiState = uiState.copy(
                 isRecording = true,
                 statusText = if (!confirmPending) "录音中" else "再次点击停止",
                 statusColor = Color(0xFFCC3333),
-                infoText = "${hrs}小时 ${m}分钟 | ${chunks} 片段\n${mb} MB | $storageInfo",
-                storageInfo = storageInfo
+                infoText = "${hrs}小时${m}分钟 | ${localFileCount}文件\n${mb} MB | $storageInfo",
+                storageInfo = storageInfo,
+                isDebugMode = isDebugMode
             )
         } else {
             confirmPending = false
+            val mb = if (recordingsDir.exists()) {
+                val totalSize = recordingsDir.listFiles()?.filter { 
+                    it.isFile && it.name.endsWith(".m4a")
+                }?.sumOf { it.length() } ?: 0L
+                String.format("%.1f", totalSize / 1024.0 / 1024.0)
+            } else {
+                "0.0"
+            }
+            
             uiState = uiState.copy(
                 isRecording = false,
                 statusText = "已停止",
                 statusColor = Color(0xFF888888),
-                infoText = "点击开始录音",
+                infoText = if (localFileCount > 0) "${localFileCount}文件待上传 | ${mb} MB" else "点击开始录音",
                 confirmPending = false,
-                storageInfo = storageInfo
+                storageInfo = storageInfo,
+                isDebugMode = isDebugMode
             )
         }
     }
