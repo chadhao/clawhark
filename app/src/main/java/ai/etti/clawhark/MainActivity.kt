@@ -16,6 +16,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
@@ -53,6 +54,24 @@ class MainActivity : ComponentActivity() {
     private var dotCount = 0
 
     private var uiState by mutableStateOf(UIState())
+    
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions.values.all { it }) {
+            if (AuthManager.isAuthenticated()) {
+                toggle()
+            }
+        } else {
+            val denied = permissions.filterValues { !it }.keys
+            val permanentlyDenied = denied.any { 
+                !ActivityCompat.shouldShowRequestPermissionRationale(this, it) 
+            }
+            if (permanentlyDenied) {
+                Toast.makeText(this, "需要权限\n前往设置 > 应用", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     private companion object {
         const val DEBOUNCE_MS = 600L
@@ -346,7 +365,7 @@ class MainActivity : ComponentActivity() {
         val storageConfig = AuthManager.getStorageConfig()
         val storageType = storageConfig?.storageType ?: StorageType.GOOGLE_DRIVE
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
-        val isDebugMode = prefs.getBoolean(RecordingService.PREF_DEBUG_MODE, false)
+        val isDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
 
         uiState = uiState.copy(
             isAuthenticated = AuthManager.isAuthenticated() || storageType == StorageType.S3,
@@ -476,13 +495,12 @@ class MainActivity : ComponentActivity() {
                     uiState = uiState.copy(uploadStatus = "上传中: 0/${files.size}")
                 }
 
-                var uploaded = 0
                 val uploadRequest = OneTimeWorkRequestBuilder<UploadWorker>().build()
                 WorkManager.getInstance(this@MainActivity).enqueue(uploadRequest)
 
                 files.forEachIndexed { index, _ ->
                     delay(500)
-                    uploaded = index + 1
+                    val uploaded = index + 1
                     withContext(Dispatchers.Main) {
                         uiState = uiState.copy(uploadStatus = "上传中: $uploaded/${files.size}")
                     }
@@ -534,10 +552,10 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleDebugMode() {
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
-        val currentDebugMode = prefs.getBoolean(RecordingService.PREF_DEBUG_MODE, false)
+        val currentDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
         val newDebugMode = !currentDebugMode
-        
-        prefs.edit().putBoolean(RecordingService.PREF_DEBUG_MODE, newDebugMode).apply()
+
+        prefs.edit().putBoolean(ServiceConfig.PREF_DEBUG_MODE, newDebugMode).apply()
         
         uiState = uiState.copy(isDebugMode = newDebugMode)
         
@@ -596,7 +614,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
-        val isDebugMode = prefs.getBoolean(RecordingService.PREF_DEBUG_MODE, false)
+        val isDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
 
         val recordingsDir = File(filesDir, "recordings")
         val localFileCount = if (recordingsDir.exists()) {
@@ -676,23 +694,8 @@ class MainActivity : ComponentActivity() {
             ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         return if (needed.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, needed.toTypedArray(), 1)
+            permissionLauncher.launch(needed.toTypedArray())
             false
         } else true
-    }
-
-    override fun onRequestPermissionsResult(code: Int, perms: Array<String>, results: IntArray) {
-        super.onRequestPermissionsResult(code, perms, results)
-        if (results.all { it == PackageManager.PERMISSION_GRANTED }) {
-            if (AuthManager.isAuthenticated()) {
-                toggle()
-            }
-        } else {
-            val denied = perms.filterIndexed { i, _ -> results[i] != PackageManager.PERMISSION_GRANTED }
-            val permanentlyDenied = denied.any { !ActivityCompat.shouldShowRequestPermissionRationale(this, it) }
-            if (permanentlyDenied) {
-                Toast.makeText(this, "需要权限\n前往设置 > 应用", Toast.LENGTH_LONG).show()
-            }
-        }
     }
 }
