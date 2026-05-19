@@ -223,10 +223,7 @@ adb connect <watch-ip>:<port>
 
 # 查看已连接的设备
 adb devices
-# 输出示例:
-# List of devices attached
-# 192.168.1.100:5555    device
-# emulator-5554         device
+
 
 # 断开指定设备
 adb disconnect <watch-ip>:<port>
@@ -265,6 +262,9 @@ adb shell am force-stop ai.etti.clawhark
 ```bash
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 adb logcat | Select-String "WR\."
+
+Android Studio Logcat
+tag:WR  package:ai.etti.clawhark
 ```
 
 ### 文件系统操作
@@ -286,40 +286,6 @@ adb shell "run-as ai.etti.clawhark ls -la files/logs/"
 adb shell "run-as ai.etti.clawhark rm files/recordings/*.wav"
 ```
 
-### 应用信息查询
-
-```bash
-# 检查应用是否已安装
-adb shell pm list packages | grep clawhark
-
-# 查看应用详细信息
-adb shell dumpsys package ai.etti.clawhark
-
-# 查看应用权限
-adb shell dumpsys package ai.etti.clawhark | grep permission
-
-# 查看应用存储使用情况
-adb shell du -sh /data/data/ai.etti.clawhark
-```
-
-### 调试技巧
-
-```bash
-# 授予录音权限（如果未授权）
-adb shell pm grant ai.etti.clawhark android.permission.RECORD_AUDIO
-
-# 查看后台服务状态
-adb shell dumpsys activity services ai.etti.clawhark
-
-# 查看电池优化状态
-adb shell dumpsys deviceidle whitelist | grep clawhark
-
-# 模拟低电量模式（测试后台运行）
-adb shell cmd battery set level 15
-
-# 恢复正常电量
-adb shell cmd battery reset
-```
 
 ### 多设备管理
 
@@ -350,30 +316,108 @@ $env:ANDROID_SERIAL = "emulator-5554"  # Windows PowerShell
 
 ## 📁 项目结构
 
+### 目录概览
+
 ```
 clawhark/
 ├── app/src/main/
 │   ├── assets/
-│   │   └── oauth_config.json.example    # OAuth 凭据模板
-│   ├── java/.../
-│   │   ├── AppLog.kt                    # 持久化文件日志记录器
-│   │   ├── AuthManager.kt              # 设备代码 OAuth2 流程
-│   │   ├── DriveUploader.kt            # Google Drive 上传
-│   │   ├── MainActivity.kt             # 单按钮界面
-│   │   └── RecordingService.kt         # 音频捕获、VAD、分块
-│   └── res/                             # 图标、布局、颜色
-├── openclaw/
-│   ├── skills/clawhark/SKILL.md         # OpenClaw 技能定义
-│   └── README.md                        # OpenClaw 集成指南
-├── scripts/
-│   ├── pull.sh                          # 从 Google Drive 拉取录音
-│   └── transcribe.py                    # 4 阶段转录管道
-├── store-listing/                       # Play Store 资源
-├── icon.png                             # 应用图标(源文件)
-├── PRIVACY.md                           # 隐私政策
-├── LICENSE                              # MIT 许可证
+│   │   └── oauth_config.json.example       # OAuth 配置模板
+│   ├── java/ai/etti/clawhark/
+│   │   ├── 📱 用户界面
+│   │   │   └── MainActivity.kt             # 单按钮界面 (702行)
+│   │   │
+│   │   ├── 🎙️ 录音服务核心
+│   │   │   ├── RecordingService.kt         # 服务协调器 (244行)
+│   │   │   ├── AudioRecorder.kt            # 音频录制核心 (378行)
+│   │   │   ├── StreamingEncoder.kt         # PCM→AAC编码器 (170行)
+│   │   │   ├── ServiceConfig.kt            # 配置管理 (81行)
+│   │   │   ├── StorageManager.kt           # 存储管理 (82行)
+│   │   │   ├── UploadScheduler.kt          # 上传调度 (83行)
+│   │   │   ├── StatusLogger.kt             # 状态日志 (146行)
+│   │   │   └── RecordingNotificationManager.kt  # 通知管理 (83行)
+│   │   │
+│   │   ├── ☁️ 云存储上传
+│   │   │   ├── UploadWorker.kt             # WorkManager后台上传
+│   │   │   ├── DriveUploader.kt            # Google Drive上传
+│   │   │   ├── S3Uploader.kt               # S3兼容存储上传
+│   │   │   ├── StorageUploader.kt          # 存储上传接口
+│   │   │   └── StorageConfig.kt            # 存储配置数据类
+│   │   │
+│   │   ├── 🔐 认证与配置
+│   │   │   └── AuthManager.kt              # OAuth2设备代码流程
+│   │   │
+│   │   ├── 🛠️ 系统集成
+│   │   │   ├── BootReceiver.kt             # 启动接收器
+│   │   │   ├── RecordingComplicationService.kt  # 表盘复杂功能
+│   │   │   ├── ComplicationToggleReceiver.kt    # 表盘快捷操作
+│   │   │   └── AppLog.kt                   # 持久化日志
+│   │   │
+│   └── res/                                 # 图标、布局、颜色
+│
+├── openclaw/                                # OpenClaw集成
+│   ├── skills/clawhark/SKILL.md            # OpenClaw技能定义
+│   └── README.md                           # 完整集成指南
+│
+├── scripts/                                 # 自动化脚本
+│   ├── pull.sh                             # 从Drive拉取录音
+│   └── transcribe.py                       # 4阶段转录管道
+│
+├── store-listing/                          # Play Store资源
+├── view-logs.ps1                           # Windows日志查看脚本
+├── icon.png                                # 应用图标
+├── PRIVACY.md                              # 隐私政策
+├── LICENSE                                 # MIT许可证
 └── README.md
 ```
+
+### 核心文件详解
+
+#### 🎙️ 录音服务模块 (模块化架构)
+
+| 文件 | 职责 | 关键功能 |
+|------|------|---------|
+| `RecordingService.kt` | **服务协调器** | 管理服务生命周期,协调各个模块,处理前台服务 |
+| `AudioRecorder.kt` | **录音核心** | 管理AudioRecord,实现VAD语音检测,处理音频流 |
+| `StreamingEncoder.kt` | **音频编码** | PCM→AAC实时编码,MediaCodec封装,临时文件管理 |
+| `ServiceConfig.kt` | **配置管理** | 生产/调试模式配置,参数集中管理 |
+| `StorageManager.kt` | **存储管理** | 文件清理,存储限制,孤立文件恢复 |
+| `UploadScheduler.kt` | **上传调度** | WorkManager定期上传,备用上传策略 |
+| `StatusLogger.kt` | **状态日志** | 电池/网络/音频状态监控,定期状态报告 |
+| `RecordingNotificationManager.kt` | **通知管理** | 前台通知,动态文本轮换 |
+
+#### ☁️ 云存储模块
+
+| 文件 | 职责 | 支持的存储 |
+|------|------|-----------|
+| `UploadWorker.kt` | 后台上传协调 | WiFi约束,重试机制,批量上传 |
+| `DriveUploader.kt` | Google Drive实现 | 使用Drive API v3,支持断点续传 |
+| `S3Uploader.kt` | S3兼容实现 | 支持七牛/阿里云/腾讯云等S3兼容服务 |
+| `StorageUploader.kt` | 存储接口 | 统一上传接口,可扩展新存储后端 |
+| `AuthManager.kt` | OAuth认证 | 设备代码流程,token管理,自动刷新 |
+
+#### 🛠️ 系统集成
+
+| 文件 | 职责 | 触发时机 |
+|------|------|---------|
+| `BootReceiver.kt` | 启动恢复 | 系统重启后自动恢复录音 |
+| `RecordingComplicationService.kt` | 表盘集成 | 在表盘显示录音状态 |
+| `ComplicationToggleReceiver.kt` | 表盘控制 | 从表盘快捷启动/停止录音 |
+| `AppLog.kt` | 日志系统 | 持久化日志,支持远程查看 |
+
+#### 📱 用户界面
+
+| 文件 | 功能 |
+|------|------|
+| `MainActivity.kt` | Compose UI,单按钮录音控制,OAuth认证流程,调试模式切换 |
+
+### 配置文件
+
+| 文件 | 用途 |
+|------|------|
+| `oauth_config.json` | 云存储凭据配置 (支持Google Drive / S3) |
+| `gradle.properties` | Gradle构建配置 |
+| `AndroidManifest.xml` | 应用权限和组件声明 |
 
 ## 🔐 隐私与安全
 
