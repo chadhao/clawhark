@@ -15,8 +15,10 @@ import androidx.wear.watchface.complications.datasource.SuspendingComplicationDa
 class RecordingComplicationService : SuspendingComplicationDataSourceService() {
 
     private fun shouldBeRecording(): Boolean {
-        return getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
-            .getBoolean(RecordingService.PREF_SHOULD_RECORD, false)
+        val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
+        if (!prefs.getBoolean(RecordingService.PREF_SHOULD_RECORD, false)) return false
+        if (prefs.getBoolean(RecordingService.PREF_PAUSED_FOR_CHARGING, false)) return false
+        return true
     }
 
     /**
@@ -57,9 +59,23 @@ class RecordingComplicationService : SuspendingComplicationDataSourceService() {
     }
 
     private fun buildComplicationData(type: ComplicationType, recording: Boolean): ComplicationData? {
-        val text = if (recording) "录音" else "关"
-        val iconRes = if (recording) R.drawable.ic_rec_on else R.drawable.ic_rec_off
-        val description = if (recording) "录音中" else "已停止"
+        val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
+        val chargingPaused = prefs.getBoolean(RecordingService.PREF_PAUSED_FOR_CHARGING, false)
+        val text = when {
+            recording -> "录音"
+            chargingPaused -> "充电"
+            else -> "关"
+        }
+        val iconRes = when {
+            recording -> R.drawable.ic_rec_on
+            chargingPaused -> R.drawable.ic_rec_off
+            else -> R.drawable.ic_rec_off
+        }
+        val description = when {
+            recording -> "录音中"
+            chargingPaused -> "充电暂停"
+            else -> "已停止"
+        }
         val tap = toggleIntent()
         val icon = MonochromaticImage.Builder(Icon.createWithResource(this, iconRes)).build()
         val complicationText = PlainComplicationText.Builder(text).build()

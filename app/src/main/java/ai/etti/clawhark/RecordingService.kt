@@ -17,7 +17,10 @@ class RecordingService : Service() {
         const val TAG = "Service"
         const val PREF_FILE = "clawhark"
         const val PREF_SHOULD_RECORD = "should_record"
+        const val PREF_PAUSE_ON_CHARGE = "pause_on_charge"
+        const val PREF_PAUSED_FOR_CHARGING = "paused_for_charging"
         const val ACTION_STOP = "STOP"
+        const val ACTION_CHARGING_POLICY_CHANGED = "CHARGING_POLICY_CHANGED"
     }
 
     private val binder = LocalBinder()
@@ -29,6 +32,7 @@ class RecordingService : Service() {
     private lateinit var statusLogger: StatusLogger
     private lateinit var notificationManager: RecordingNotificationManager
     private lateinit var audioRecorder: AudioRecorder
+    private lateinit var chargingMonitor: ChargingMonitor
     
     private var stats = AudioRecorder.AudioRecorderStats()
     
@@ -64,6 +68,11 @@ class RecordingService : Service() {
         audioRecorder = AudioRecorder(this, config, storageManager) { newStats ->
             stats = newStats
         }
+        chargingMonitor = ChargingMonitor(
+            context = this,
+            onPowerConnected = { handlePowerConnected() },
+            onPowerDisconnected = { handlePowerDisconnected() }
+        )
         
         AppLog.i(TAG, "=== 服务已创建 ===")
         AppLog.i(TAG, "设备: ${android.os.Build.MODEL} (${android.os.Build.DEVICE})")
@@ -71,13 +80,13 @@ class RecordingService : Service() {
         AppLog.i(TAG, "模式: ${if (config.isDebugMode) "调试" else "生产"}")
         AppLog.i(TAG, "Codec: Opus ${AudioRecorder.OPUS_BIT_RATE/1000}kbps | Chunk: ${config.chunkDurationMs/60000}min | Upload: every ${config.uploadIntervalMinutes}min")
         
-        // 调试模式输出编码器信息
         if (config.isDebugMode) {
             CodecDetector.detectAndLog()
         }
         
         statusLogger.logBatteryStatus()
         notificationManager.createNotificationChannel()
+        chargingMonitor.register()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -87,6 +96,7 @@ class RecordingService : Service() {
         when (action) {
             ACTION_STOP -> {
                 AppLog.i(TAG, "停止请求 - 关闭服务")
+                clearPausedForCharging()
                 getSharedPreferences(PREF_FILE, MODE_PRIVATE)
                     .edit().putBoolean(PREF_SHOULD_RECORD, false).apply()
                 logFinalStats()
@@ -94,6 +104,10 @@ class RecordingService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
+            }
+            ACTION_CHARGING_POLICY_CHANGED -> {
+                handleChargingPolicyChanged()
+                return START_STICKY
             }
             else -> {
                 if (intent == null) {
@@ -106,12 +120,7 @@ class RecordingService : Service() {
                     }
                     AppLog.i(TAG, "START_STICKY重启 - 恢复录音")
                 }
-                startForeground(
-                    RecordingNotificationManager.NOTIFICATION_ID,
-                    notificationManager.createNotification(),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                )
-                startRecording()
+                handleServiceStart()
             }
         }
         return START_STICKY
@@ -121,6 +130,7 @@ class RecordingService : Service() {
         AppLog.i(TAG, "=== 服务已销毁 ===")
         logFinalStats()
         audioRecorder.stop()
+        chargingMonitor.dispose()
         scope.cancel()
         super.onDestroy()
     }
@@ -146,10 +156,130 @@ class RecordingService : Service() {
         super.onLowMemory()
     }
 
+    private fun handleServiceStart() {
+        val prefs = getSharedPreferences(PREF_FILE, MODE_PRIVATE)
+        if (!prefs.getBoolean(PREF_SHOULD_RECORD, true)) {
+            stopSelf()
+            return
+        }
+
+        if (shouldDeferRecordingForCharging()) {
+            AppLog.i(TAG, "当前充电中 - 等待拔电后恢复录音")
+            setPausedForCharging(true)
+            enterChargingIdleState()
+            return
+        }
+
+        clearPausedForCharging()
+        promoteToRecordingForeground()
+        startRecording()
+    }
+
+    private fun handleChargingPolicyChanged() {
+        val prefs = getSharedPreferences(PREF_FILE, MODE_PRIVATE)
+        if (!prefs.getBoolean(PREF_SHOULD_RECORD, false)) return
+
+        if (!ChargingMonitor.isPauseOnChargeEnabled(this)) {
+            clearPausedForCharging()
+            if (!ChargingMonitor.isCharging(this) && !audioRecorder.isCurrentlyRecording()) {
+                promoteToRecordingForeground()
+                startRecording()
+            }
+            updateComplication()
+            return
+        }
+
+        if (ChargingMonitor.isCharging(this)) {
+            if (audioRecorder.isCurrentlyRecording()) {
+                pauseForCharging()
+            } else if (!isPausedForCharging()) {
+                setPausedForCharging(true)
+                enterChargingIdleState()
+            }
+        }
+        updateComplication()
+    }
+
+    private fun handlePowerConnected() {
+        if (!ChargingMonitor.isPauseOnChargeEnabled(this)) return
+        val prefs = getSharedPreferences(PREF_FILE, MODE_PRIVATE)
+        if (!prefs.getBoolean(PREF_SHOULD_RECORD, false)) return
+
+        AppLog.i(TAG, "检测到充电 - 暂停录音并上传")
+        if (audioRecorder.isCurrentlyRecording()) {
+            pauseForCharging()
+        } else {
+            setPausedForCharging(true)
+            enterChargingIdleState()
+        }
+    }
+
+    private fun handlePowerDisconnected() {
+        if (!ChargingMonitor.isPauseOnChargeEnabled(this)) return
+        val prefs = getSharedPreferences(PREF_FILE, MODE_PRIVATE)
+        if (!prefs.getBoolean(PREF_PAUSED_FOR_CHARGING, false)) return
+        if (!prefs.getBoolean(PREF_SHOULD_RECORD, false)) {
+            clearPausedForCharging()
+            return
+        }
+
+        AppLog.i(TAG, "检测到拔电 - 恢复录音")
+        resumeFromChargingPause()
+    }
+
+    private fun pauseForCharging() {
+        if (!audioRecorder.isCurrentlyRecording()) return
+        setPausedForCharging(true)
+        stopRecording()
+        enterChargingIdleState()
+        updateComplication()
+    }
+
+    private fun resumeFromChargingPause() {
+        if (ChargingMonitor.isCharging(this)) return
+        clearPausedForCharging()
+        promoteToRecordingForeground()
+        startRecording()
+    }
+
+    private fun shouldDeferRecordingForCharging(): Boolean {
+        return ChargingMonitor.isPauseOnChargeEnabled(this) && ChargingMonitor.isCharging(this)
+    }
+
+    private fun enterChargingIdleState() {
+        notificationManager.stopWordRotation()
+        startForeground(
+            RecordingNotificationManager.NOTIFICATION_ID,
+            notificationManager.createChargingPausedNotification(),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
+    }
+
+    private fun promoteToRecordingForeground() {
+        startForeground(
+            RecordingNotificationManager.NOTIFICATION_ID,
+            notificationManager.createNotification(),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        )
+    }
+
+    private fun setPausedForCharging(paused: Boolean) {
+        getSharedPreferences(PREF_FILE, MODE_PRIVATE)
+            .edit().putBoolean(PREF_PAUSED_FOR_CHARGING, paused).apply()
+    }
+
+    private fun clearPausedForCharging() {
+        setPausedForCharging(false)
+    }
 
     private fun startRecording() {
         if (audioRecorder.isCurrentlyRecording()) {
             AppLog.w(TAG, "已在录音 - 忽略")
+            return
+        }
+        if (shouldDeferRecordingForCharging()) {
+            AppLog.i(TAG, "充电中 - 跳过启动录音")
+            enterChargingIdleState()
             return
         }
         
@@ -197,6 +327,17 @@ class RecordingService : Service() {
 
     fun isCurrentlyRecording() = audioRecorder.isCurrentlyRecording()
 
+    fun isPausedForCharging(): Boolean {
+        return getSharedPreferences(PREF_FILE, MODE_PRIVATE)
+            .getBoolean(PREF_PAUSED_FOR_CHARGING, false) &&
+            !audioRecorder.isCurrentlyRecording()
+    }
+
+    fun isSessionActive(): Boolean {
+        val prefs = getSharedPreferences(PREF_FILE, MODE_PRIVATE)
+        return prefs.getBoolean(PREF_SHOULD_RECORD, false) &&
+            (audioRecorder.isCurrentlyRecording() || isPausedForCharging())
+    }
 
     private fun logPeriodicStatus() {
         statusLogger.logPeriodicStatus(

@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
     private var dotCount = 0
 
     private var uiState by mutableStateOf(UIState())
+    private var showSettings by mutableStateOf(false)
     
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -112,6 +113,8 @@ class MainActivity : ComponentActivity() {
     data class UIState(
         val isAuthenticated: Boolean = false,
         val isRecording: Boolean = false,
+        val sessionActive: Boolean = false,
+        val isPausedForCharging: Boolean = false,
         val statusText: String = "已停止",
         val statusColor: Color = Color(0xFF888888),
         val infoText: String = "点击开始录音",
@@ -123,7 +126,8 @@ class MainActivity : ComponentActivity() {
         val storageInfo: String = "Drive",
         val confirmPending: Boolean = false,
         val uploadStatus: String = "",
-        val isDebugMode: Boolean = false
+        val isDebugMode: Boolean = false,
+        val pauseOnCharge: Boolean = true
     )
 
     private val connection = object : ServiceConnection {
@@ -227,7 +231,11 @@ class MainActivity : ComponentActivity() {
                 state = listState
             ) {
                 if (uiState.isAuthenticated) {
-                    item { RecordingScreen() }
+                    if (showSettings) {
+                        item { SettingsScreen() }
+                    } else {
+                        item { RecordingScreen() }
+                    }
                 } else {
                     item { AuthScreen() }
                 }
@@ -262,11 +270,11 @@ class MainActivity : ComponentActivity() {
                 },
                 modifier = Modifier.size(100.dp),
                 colors = ButtonDefaults.buttonColors(
-                    backgroundColor = if (uiState.isRecording) Color(0xFFCC3333) else Color(0xFFAA6639)
+                    backgroundColor = if (uiState.sessionActive) Color(0xFFCC3333) else Color(0xFFAA6639)
                 )
             ) {
                 Text(
-                    text = if (uiState.confirmPending) "确定?" else if (uiState.isRecording) "停止" else "开始",
+                    text = if (uiState.confirmPending) "确定?" else if (uiState.sessionActive) "停止" else "开始",
                     style = MaterialTheme.typography.button
                 )
             }
@@ -279,6 +287,51 @@ class MainActivity : ComponentActivity() {
             )
 
             Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = { showSettings = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF444444))
+            ) {
+                Text("设置", style = MaterialTheme.typography.caption1)
+            }
+        }
+    }
+
+    @Composable
+    fun SettingsScreen() {
+        val haptic = LocalHapticFeedback.current
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "设置",
+                color = Color.White,
+                style = MaterialTheme.typography.title3,
+                textAlign = TextAlign.Center
+            )
+
+            Button(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    togglePauseOnCharge()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = if (uiState.pauseOnCharge) Color(0xFFAA6639) else Color(0xFF444444)
+                )
+            ) {
+                Text(
+                    text = if (uiState.pauseOnCharge) "充电暂停并上传 (开)" else "充电暂停并上传 (关)",
+                    style = MaterialTheme.typography.caption1
+                )
+            }
 
             Button(
                 onClick = { manualUploadAll() },
@@ -311,7 +364,7 @@ class MainActivity : ComponentActivity() {
 
             Button(
                 onClick = { toggleDebugMode() },
-                enabled = !uiState.isRecording,
+                enabled = !uiState.sessionActive,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(40.dp),
@@ -324,6 +377,16 @@ class MainActivity : ComponentActivity() {
                     text = if (uiState.isDebugMode) "调试模式 (开)" else "调试模式 (关)",
                     style = MaterialTheme.typography.caption1
                 )
+            }
+
+            Button(
+                onClick = { showSettings = false },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF333333))
+            ) {
+                Text("返回", style = MaterialTheme.typography.caption1)
             }
         }
     }
@@ -397,10 +460,12 @@ class MainActivity : ComponentActivity() {
         val storageType = storageConfig?.storageType ?: StorageType.GOOGLE_DRIVE
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
         val isDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
+        val pauseOnCharge = prefs.getBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, true)
 
         uiState = uiState.copy(
             isAuthenticated = AuthManager.isAuthenticated() || storageType == StorageType.S3,
-            isDebugMode = isDebugMode
+            isDebugMode = isDebugMode,
+            pauseOnCharge = pauseOnCharge
         )
     }
 
@@ -578,6 +643,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun togglePauseOnCharge() {
+        val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
+        val newValue = !prefs.getBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, true)
+        prefs.edit().putBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, newValue).apply()
+        uiState = uiState.copy(pauseOnCharge = newValue)
+
+        val intent = Intent(this, RecordingService::class.java).apply {
+            action = RecordingService.ACTION_CHARGING_POLICY_CHANGED
+        }
+        startService(intent)
+
+        val msg = if (newValue) "充电时将自动暂停并上传" else "充电时暂停已关闭"
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        updateUI()
+    }
+
     private fun toggleDebugMode() {
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
         val currentDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
@@ -596,7 +677,12 @@ class MainActivity : ComponentActivity() {
     private fun toggle() {
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
         val svc = service
-        if (svc == null || !svc.isCurrentlyRecording()) {
+        val sessionActive = when {
+            svc != null -> svc.isSessionActive()
+            prefs.getBoolean(RecordingService.PREF_SHOULD_RECORD, false) -> true
+            else -> false
+        }
+        if (!sessionActive) {
             confirmPending = false
             confirmResetJob?.cancel()
             prefs.edit().putBoolean(RecordingService.PREF_SHOULD_RECORD, true).apply()
@@ -643,13 +729,31 @@ class MainActivity : ComponentActivity() {
 
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
         val isDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
+        val pauseOnCharge = prefs.getBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, true)
 
         val recordingsDir = File(filesDir, "recordings")
         val localCounts = countLocalRecordings(recordingsDir)
         val localFileLabel = localCounts.formatLabel()
 
         val svc = service
-        if (svc != null && svc.isCurrentlyRecording()) {
+        if (svc != null && svc.isPausedForCharging()) {
+            val mb = String.format("%.1f", localRecordingsSizeBytes(recordingsDir) / 1024.0 / 1024.0)
+            uiState = uiState.copy(
+                isRecording = false,
+                sessionActive = true,
+                isPausedForCharging = true,
+                statusText = if (!confirmPending) "充电暂停" else "再次点击停止",
+                statusColor = Color(0xFFFFAA00),
+                infoText = if (localCounts.totalUploadCount > 0) {
+                    "拔电后自动恢复\n${localCounts.formatPendingUpload()} | ${mb} MB"
+                } else {
+                    "拔电后自动恢复"
+                },
+                storageInfo = storageInfo,
+                isDebugMode = isDebugMode,
+                pauseOnCharge = pauseOnCharge
+            )
+        } else if (svc != null && svc.isCurrentlyRecording()) {
             val elapsed = System.currentTimeMillis() - svc.recordingStartTime
             val mins = (elapsed / 60000).toInt()
             val hrs = mins / 60
@@ -658,11 +762,14 @@ class MainActivity : ComponentActivity() {
 
             uiState = uiState.copy(
                 isRecording = true,
+                sessionActive = true,
+                isPausedForCharging = false,
                 statusText = if (!confirmPending) "录音中" else "再次点击停止",
                 statusColor = Color(0xFFCC3333),
                 infoText = "${hrs}小时${m}分钟 | $localFileLabel\n${mb} MB | $storageInfo",
                 storageInfo = storageInfo,
-                isDebugMode = isDebugMode
+                isDebugMode = isDebugMode,
+                pauseOnCharge = pauseOnCharge
             )
         } else {
             confirmPending = false
@@ -670,6 +777,8 @@ class MainActivity : ComponentActivity() {
             
             uiState = uiState.copy(
                 isRecording = false,
+                sessionActive = false,
+                isPausedForCharging = false,
                 statusText = "已停止",
                 statusColor = Color(0xFF888888),
                 infoText = if (localCounts.totalUploadCount > 0) {
@@ -679,7 +788,8 @@ class MainActivity : ComponentActivity() {
                 },
                 confirmPending = false,
                 storageInfo = storageInfo,
-                isDebugMode = isDebugMode
+                isDebugMode = isDebugMode,
+                pauseOnCharge = pauseOnCharge
             )
         }
     }

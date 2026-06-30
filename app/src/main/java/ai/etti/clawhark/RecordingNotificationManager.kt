@@ -45,13 +45,21 @@ class RecordingNotificationManager(private val context: Context) {
     }
     
     fun createNotification(): Notification {
+        return buildNotification(LISTENING_WORDS[currentWordIndex])
+    }
+
+    fun createChargingPausedNotification(): Notification {
+        return buildNotification("充电中，已暂停录音")
+    }
+
+    private fun buildNotification(contentText: String): Notification {
         val intent = Intent(context, MainActivity::class.java)
         val pending = PendingIntent.getActivity(
             context, 0, intent, PendingIntent.FLAG_IMMUTABLE
         )
         return Notification.Builder(context, CHANNEL_ID)
             .setContentTitle("ClawHark")
-            .setContentText(LISTENING_WORDS[currentWordIndex])
+            .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pending)
             .setOngoing(true)
