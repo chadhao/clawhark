@@ -55,7 +55,7 @@ files = json.load(sys.stdin).get('files', [])
 for f in files:
     print(f'{f[\"id\"]} {f[\"name\"]} {f.get(\"size\",\"?\")}')
 " | while read FILE_ID FILENAME SIZE; do
-  # Extract date from filename (chunk_YYYY-MM-DD_HH-MM-SS.wav)
+  # Extract date from filename (chunk_YYYY-MM-DD_HH-MM-SS.opus / .opus.json / .wav)
   DATE=$(echo "$FILENAME" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
   if [ -z "$DATE" ]; then
     DATE="unknown"

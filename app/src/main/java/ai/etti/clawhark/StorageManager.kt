@@ -19,7 +19,9 @@ class StorageManager(
     }
     
     fun getRecordings(): List<File> {
-        return getChunkDir().listFiles()?.filter { it.extension == "m4a" }?.sortedBy { it.name } ?: emptyList()
+        return getChunkDir().listFiles()?.filter {
+            it.extension == "opus" || it.extension == "m4a"
+        }?.sortedBy { it.name } ?: emptyList()
     }
     
     fun getStorageUsed(): Long = getRecordings().sumOf { it.length() }

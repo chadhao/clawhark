@@ -31,8 +31,10 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             return Result.success()
         }
 
-        // 只上传 .opus 文件(不上传仍在写入的 .tmp 文件)
-        val files = dir.listFiles()?.filter { it.extension == "opus" }?.sortedBy { it.name } ?: emptyList()
+        // 上传 .opus 及侧车 .opus.json（不上传仍在写入的 .tmp 文件）
+        val files = dir.listFiles()?.filter {
+            it.extension == "opus" && !it.name.endsWith(".uploading")
+        }?.sortedBy { it.name } ?: emptyList()
         if (files.isEmpty()) {
             AppLog.d(TAG, "没有文件需要上传")
             return Result.success()
@@ -96,6 +98,20 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
                 if (ok) {
                     uploadingFile.delete()
+                    val sidecar = ChunkMetadata.sidecarFileFor(file)
+                    if (sidecar.exists()) {
+                        val uploadingSidecar = File(sidecar.parent, sidecar.name + ".uploading")
+                        if (sidecar.renameTo(uploadingSidecar)) {
+                            val sidecarOk = uploader.uploadFile(uploadingSidecar)
+                            if (sidecarOk) {
+                                uploadingSidecar.delete()
+                                AppLog.i(TAG, "侧车元数据已上传: ${sidecar.name}")
+                            } else {
+                                uploadingSidecar.renameTo(sidecar)
+                                AppLog.w(TAG, "侧车元数据上传失败: ${sidecar.name}")
+                            }
+                        }
+                    }
                     succeeded++
                     consecutiveFailures = 0
                     AppLog.i(TAG, "上传成功: ${file.name} 耗时 ${elapsed}ms ($succeeded/${files.size})")

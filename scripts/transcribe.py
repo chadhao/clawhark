@@ -35,6 +35,100 @@ def get_recordings_dir():
 def get_transcripts_dir():
     return os.environ.get("CLAWHARK_TRANSCRIPTS", os.path.expanduser("~/.clawhark/transcripts"))
 
+def sidecar_path(chunk_path):
+    """侧车元数据路径：chunk_xxx.opus → chunk_xxx.opus.json"""
+    return Path(str(chunk_path) + ".json")
+
+def load_chunk_metadata(chunk_path):
+    """加载 chunk 侧车 JSON，不存在则返回 None。"""
+    path = sidecar_path(chunk_path)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"  警告: 无法读取元数据 {path.name}: {e}")
+        return None
+
+def parse_chunk_filename_time(chunk_path):
+    """从文件名解析 chunk 墙钟起点（秒级精度）。"""
+    stem = Path(chunk_path).stem
+    try:
+        return datetime.strptime(stem.split("chunk_")[1], "%Y-%m-%d_%H-%M-%S")
+    except (ValueError, IndexError):
+        return None
+
+def chunk_effective_start(chunk_path, meta=None):
+    """chunk 内第一段语音的真实墙钟时间。"""
+    meta = meta if meta is not None else load_chunk_metadata(chunk_path)
+    if meta and meta.get("segments"):
+        return datetime.fromtimestamp(meta["segments"][0]["wallClockStartMs"] / 1000)
+    t = parse_chunk_filename_time(chunk_path)
+    return t or datetime.min
+
+def chunk_effective_end(chunk_path, meta=None):
+    """chunk 内最后一段语音结束的真实墙钟时间。"""
+    meta = meta if meta is not None else load_chunk_metadata(chunk_path)
+    if meta and meta.get("segments"):
+        last = meta["segments"][-1]
+        end_ms = last["wallClockStartMs"] + last["durationMs"]
+        return datetime.fromtimestamp(end_ms / 1000)
+    t = parse_chunk_filename_time(chunk_path)
+    if t:
+        return t + timedelta(minutes=15)
+    return datetime.min
+
+def get_audio_duration_ms(audio_path):
+    """用 ffprobe 获取音频时长（毫秒）。"""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return int(float(result.stdout.strip()) * 1000)
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+        pass
+    return 0
+
+def build_merged_metadata(chunks):
+    """合并多个 chunk 的侧车元数据，audioOffsetMs 按拼接顺序累加。"""
+    merged_segments = []
+    audio_offset = 0
+    sample_rate = 16000
+    for chunk in chunks:
+        meta = load_chunk_metadata(chunk)
+        if meta:
+            sample_rate = meta.get("sampleRate", sample_rate)
+            for seg in meta.get("segments", []):
+                merged_segments.append({
+                    "wallClockStartMs": seg["wallClockStartMs"],
+                    "audioOffsetMs": audio_offset + seg["audioOffsetMs"],
+                    "durationMs": seg["durationMs"],
+                })
+        audio_offset += get_audio_duration_ms(chunk)
+    if not merged_segments:
+        return None
+    return {"version": 1, "sampleRate": sample_rate, "segments": merged_segments}
+
+def audio_ms_to_wall_clock(meta, audio_ms):
+    """将文件内音频偏移（毫秒）映射为真实墙钟 datetime。"""
+    if not meta or not meta.get("segments"):
+        return None
+    for seg in meta["segments"]:
+        start = seg["audioOffsetMs"]
+        end = start + seg["durationMs"]
+        if start <= audio_ms < end:
+            wall_ms = seg["wallClockStartMs"] + (audio_ms - start)
+            return datetime.fromtimestamp(wall_ms / 1000)
+    return None
+
+def format_wall_clock(dt):
+    if dt is None:
+        return "?"
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
 def phase1_detect_speech(date_dir, chunks):
     """Use whisper to detect which chunks have actual speech."""
     print(f"\n📝 Phase 1: Speech detection ({len(chunks)} chunks)")
@@ -66,7 +160,7 @@ def phase1_detect_speech(date_dir, chunks):
     return speech_chunks
 
 def phase2_segment(chunks):
-    """Group chunks into conversations based on time gaps."""
+    """Group chunks into conversations based on time gaps (优先使用侧车元数据)."""
     print(f"\n🔗 Phase 2: Segmentation")
     if not chunks:
         return []
@@ -75,16 +169,11 @@ def phase2_segment(chunks):
     current = [chunks[0]]
 
     for i in range(1, len(chunks)):
-        # Parse timestamps from filenames: chunk_YYYY-MM-DD_HH-MM-SS.wav
-        prev_name = chunks[i-1].stem
-        curr_name = chunks[i].stem
-
-        try:
-            prev_time = datetime.strptime(prev_name.split("chunk_")[1], "%Y-%m-%d_%H-%M-%S")
-            curr_time = datetime.strptime(curr_name.split("chunk_")[1], "%Y-%m-%d_%H-%M-%S")
-            gap = (curr_time - prev_time).total_seconds()
-        except (ValueError, IndexError):
-            gap = 300  # Default 5min gap
+        prev_meta = load_chunk_metadata(chunks[i - 1])
+        curr_meta = load_chunk_metadata(chunks[i])
+        prev_end = chunk_effective_end(chunks[i - 1], prev_meta)
+        curr_start = chunk_effective_start(chunks[i], curr_meta)
+        gap = (curr_start - prev_end).total_seconds()
 
         if gap > 600:  # >10 min gap = new conversation
             conversations.append(current)
@@ -105,11 +194,12 @@ def phase3_concat(conversations, output_dir):
     outputs = []
 
     for i, conv in enumerate(conversations):
+        merged_meta = build_merged_metadata(conv)
         if len(conv) == 1:
-            outputs.append(conv[0])
+            outputs.append((conv[0], merged_meta or load_chunk_metadata(conv[0])))
             continue
 
-        output = output_dir / f"conversation_{i+1}.wav"
+        output = output_dir / f"conversation_{i+1}.opus"
         filelist = output_dir / f"filelist_{i+1}.txt"
 
         with open(filelist, "w") as f:
@@ -123,12 +213,12 @@ def phase3_concat(conversations, output_dir):
 
         filelist.unlink()
         print(f"  Merged {len(conv)} chunks → {output.name}")
-        outputs.append(output)
+        outputs.append((output, merged_meta))
 
     return outputs
 
-def phase4_diarize(audio_files, transcript_path, provider="assemblyai"):
-    """Speaker-diarized transcription."""
+def phase4_diarize(audio_entries, transcript_path, provider="assemblyai"):
+    """Speaker-diarized transcription with wall-clock timestamps from sidecar metadata."""
     print(f"\n🎙️ Phase 4: Diarization ({provider})")
 
     transcript_path = Path(transcript_path)
@@ -136,13 +226,13 @@ def phase4_diarize(audio_files, transcript_path, provider="assemblyai"):
 
     all_text = []
 
-    for audio in audio_files:
+    for audio, meta in audio_entries:
         print(f"  Transcribing: {audio.name}")
 
         if provider == "assemblyai":
-            text = _diarize_assemblyai(audio)
+            text = _diarize_assemblyai(audio, meta)
         elif provider == "gemini":
-            text = _diarize_gemini(audio)
+            text = _diarize_gemini(audio, meta)
         else:
             text = f"Unknown provider: {provider}"
 
@@ -153,7 +243,14 @@ def phase4_diarize(audio_files, transcript_path, provider="assemblyai"):
     print(f"\n✅ Transcript saved: {transcript_path}")
     return transcript_path
 
-def _diarize_assemblyai(audio_path):
+def _format_utterance_time(meta, start_ms):
+    """优先输出墙钟时间，无元数据时回退为音频内偏移秒数。"""
+    wall = audio_ms_to_wall_clock(meta, start_ms)
+    if wall:
+        return format_wall_clock(wall)
+    return f"{start_ms / 1000:.0f}s"
+
+def _diarize_assemblyai(audio_path, meta=None):
     """Transcribe with AssemblyAI Universal-3 + speaker diarization."""
     import requests
 
@@ -185,17 +282,18 @@ def _diarize_assemblyai(audio_path):
             return f"Error: {result.get('error', 'unknown')}"
         import time; time.sleep(3)
 
-    # Format with speakers
+    # Format with speakers and wall-clock time
     lines = []
     for utterance in result.get("utterances", []):
         speaker = utterance["speaker"]
         text = utterance["text"]
-        start = utterance["start"] / 1000
-        lines.append(f"**Speaker {speaker}** ({start:.0f}s): {text}")
+        start = utterance["start"]
+        time_label = _format_utterance_time(meta, start)
+        lines.append(f"**Speaker {speaker}** ({time_label}): {text}")
 
     return "\n\n".join(lines) if lines else result.get("text", "No text")
 
-def _diarize_gemini(audio_path):
+def _diarize_gemini(audio_path, meta=None):
     """Transcribe with Gemini multimodal."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -239,7 +337,7 @@ def main():
         print(f"No recordings found for {args.date} in {recordings_dir}")
         sys.exit(1)
 
-    chunks = sorted(date_dir.glob("chunk_*.wav")) + sorted(date_dir.glob("chunk_*.m4a"))
+    chunks = sorted(date_dir.glob("chunk_*.opus")) + sorted(date_dir.glob("chunk_*.wav")) + sorted(date_dir.glob("chunk_*.m4a"))
     if not chunks:
         print(f"No audio chunks found in {date_dir}")
         sys.exit(1)

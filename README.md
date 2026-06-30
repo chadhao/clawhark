@@ -13,7 +13,7 @@
   <a href="https://play.google.com/store/apps/details?id=ai.etti.clawhark"><img src="https://img.shields.io/badge/Google%20Play-Download-red.svg?logo=google-play" alt="Google Play" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-red.svg" alt="MIT License" /></a>
   <a href="https://developer.android.com/wear"><img src="https://img.shields.io/badge/platform-Wear%20OS%204%2B-green.svg" alt="Wear OS" /></a>
-  <a href="https://github.com/etticat/clawhark/releases"><img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version" /></a>
+  <a href="https://github.com/etticat/clawhark/releases"><img src="https://img.shields.io/badge/version-1.1.0-blue.svg" alt="Version" /></a>
 </p>
 
 ---
@@ -27,22 +27,54 @@ ClawHark 在后台录制你的日常活动,过滤静音,上传到你的 Google D
 | 功能 | 详情 |
 |---------|---------|
 | 🎙️ **始终开启录音** | 前台服务配合唤醒锁——可在息屏和重启后继续运行 |
-| 🔇 **语音活动检测** | 仅在有人说话时保存音频——节省电量和存储空间 |
-| ☁️ **多云存储支持** | 支持 Google Drive 或 S3 兼容存储(七牛云、阿里云等),5 分钟 WAV 音频块通过 WiFi 上传,上传后自动删除 |
+| 🔇 **语音活动检测** | 仅在有人说话时写入音频——节省电量和存储；长静音段不写入文件 |
+| 🕐 **侧车时间元数据** | 每个音频块附带 JSON，记录 chunk 内各语音段的真实墙钟时间与文件内偏移 |
+| ☁️ **多云存储支持** | 支持 Google Drive 或 S3 兼容存储(七牛云、阿里云等)，15 分钟 Opus 音频块通过 WiFi 上传，上传后自动删除 |
 | 🔄 **启动持久化** | 手表重启后自动恢复录音 |
-| 🎯 **单按钮界面** | 点击开始,双击停止。就这么简单。 |
+| 🎯 **单按钮界面** | 点击开始，双击停止。就这么简单。 |
 | 📱 **无需配套应用** | 完全独立运行在手表上 |
-| 🔒 **隐私优先** | `drive.file` 权限范围——只能访问自己创建的文件。无分析,无追踪 |
+| 🔒 **隐私优先** | `drive.file` 权限范围——只能访问自己创建的文件。无分析，无追踪 |
 
 ## 🔄 工作原理
 
-> **手表** → 通过 VAD 全天候录音 → **云存储(Google Drive/S3)** → 自动上传 5 分钟音频块 → **你的电脑** → 拉取、转录、输入 AI
+> **手表** → 通过 VAD 全天候录音 → **云存储(Google Drive/S3)** → 自动上传 15 分钟 Opus 块 + 侧车 JSON → **你的电脑** → 拉取、转录、输入 AI
 
-1. **录音** — 手表持续捕捉音频,语音活动检测过滤静音
-2. **上传** — 音频块上传到你的云存储中的 `ClawHark/` 文件夹
+1. **录音** — 手表以 16 kHz 单声道持续采集；VAD 跳过长静音，但侧车 JSON 记录每段语音的真实开始时间
+2. **上传** — 音频块与对应 `.opus.json` 元数据上传到你的云存储中的 `ClawHark/` 文件夹
 3. **拉取** — 电脑上的脚本下载并按日期整理
-4. **转录** — Whisper + AssemblyAI 生成说话人分离的转录文本
+4. **转录** — Whisper + AssemblyAI 生成带墙钟时间戳的说话人分离转录文本
 5. **执行** — 你的 AI 助手读取转录文本并提取行动项目
+
+### 音频格式与切片
+
+| 项目 | 生产环境 | 调试模式 |
+|------|----------|----------|
+| 编码 | Opus 16 kbps (OGG 容器) | 同左 |
+| 块时长 | 15 分钟 | 2 分钟 |
+| VAD 静音阈值 | 振幅 > 600 视为有语音 | 禁用(阈值 0) |
+| 静音超时 | 连续 3 秒静音后停止写入 | 同左 |
+| 上传间隔 | 每 60 分钟(WiFi) | 每 15 分钟 |
+
+每个 15 分钟窗口内，若出现多次「说话 → 长静音 → 再说话」，音频仍保存在**同一个** `.opus` 文件中（VAD 跳过中间静音以节省空间）。同时生成侧车文件 `chunk_YYYY-MM-DD_HH-mm-ss.opus.json`，记录各语音段在文件内的偏移与真实墙钟起点：
+
+```json
+{
+  "version": 1,
+  "audioFile": "chunk_2026-06-30_10-00-00.opus",
+  "chunkWallClockStartMs": 1719756000000,
+  "sampleRate": 16000,
+  "segments": [
+    { "wallClockStartMs": 1719756005000, "audioOffsetMs": 0, "durationMs": 120000 },
+    { "wallClockStartMs": 1719756720000, "audioOffsetMs": 120500, "durationMs": 95000 }
+  ]
+}
+```
+
+- `wallClockStartMs` — 该段语音的真实开始时间（毫秒时间戳）
+- `audioOffsetMs` — 在 Opus 文件内的起始位置（毫秒）
+- `durationMs` — 该段在文件内的时长（毫秒）
+
+转录管道 `scripts/transcribe.py` 读取侧车 JSON，将 AssemblyAI/Gemini 返回的音频内偏移映射为墙钟时间（例如 `2026-06-30 10:12:05`），并在分段对话时用各段真实结束/开始时间计算 chunk 间隔。
 
 ## 🚀 快速开始
 
@@ -175,6 +207,27 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 在你的手表上打开 **ClawHark** → **关联**你的 Google Drive → 点击 **Start**。完成。
 
+### 5. 转录（可选）
+
+从云存储拉取录音后，运行转录管道：
+
+```bash
+# 拉取（需配置 ~/.clawhark/credentials.json）
+CLAWHARK_OUTPUT=~/.clawhark/recordings ./scripts/pull.sh
+
+# 转录指定日期（自动读取 .opus.json 侧车元数据）
+python3 scripts/transcribe.py 2026-06-30
+python3 scripts/transcribe.py 2026-06-30 --provider gemini
+```
+
+输出示例（含墙钟时间）：
+
+```markdown
+**Speaker A** (2026-06-30 10:02:15): 我们周五前把提案发过去。
+
+**Speaker B** (2026-06-30 10:12:40): 好的，我来跟进 Sarah 那边。
+```
+
 ## 🤖 与 OpenClaw 配合使用
 
 [OpenClaw](https://github.com/openclaw/openclaw) 将 ClawHark 转变为完全自动化的 AI 可穿戴管道。查看**[完整的 OpenClaw 设置指南](openclaw/)**了解详细说明,或快速开始:
@@ -270,11 +323,14 @@ tag:WR  package:ai.etti.clawhark
 ### 文件系统操作
 
 ```bash
-# 查看手表上的录音文件
+# 查看手表上的录音文件（.opus 与侧车 .opus.json）
 adb shell "run-as ai.etti.clawhark ls -la files/recordings/"
 
-# 下载录音文件到电脑
-adb shell "run-as ai.etti.clawhark cat files/recordings/recording_xxx.wav" > recording.wav
+# 下载单个录音块到电脑
+adb shell "run-as ai.etti.clawhark cat files/recordings/chunk_2026-06-30_10-00-00.opus" > chunk.opus
+
+# 下载对应侧车元数据
+adb shell "run-as ai.etti.clawhark cat files/recordings/chunk_2026-06-30_10-00-00.opus.json" > chunk.opus.json
 
 # 查看应用数据目录
 adb shell "run-as ai.etti.clawhark ls -la files/"
@@ -283,7 +339,7 @@ adb shell "run-as ai.etti.clawhark ls -la files/"
 adb shell "run-as ai.etti.clawhark ls -la files/logs/"
 
 # 清空录音文件（谨慎使用）
-adb shell "run-as ai.etti.clawhark rm files/recordings/*.wav"
+adb shell "run-as ai.etti.clawhark rm files/recordings/*.opus files/recordings/*.opus.json"
 ```
 
 
@@ -306,11 +362,12 @@ $env:ANDROID_SERIAL = "emulator-5554"  # Windows PowerShell
 
 | 问题 | 原因 | 解决方法 |
 |---------|-------|-----|
-| 所有音频块都是静音 | VAD 阈值过高 | 在 `RecordingService.kt` 中降低 `VAD_THRESHOLD` |
+| 所有音频块都是静音 | VAD 阈值过高 | 在 `ServiceConfig.kt` 中降低 `VAD_THRESHOLD_PROD`，或开启调试模式 |
 | 上传失败 | WiFi 断开 | 检查手表 WiFi 设置,禁用省电模式 |
 | `ERROR_DEAD_OBJECT` | 电话占用了麦克风 | 通话结束后自动恢复 |
 | 服务被杀死 | 内存压力 | 为 ClawHark 禁用电池优化 |
 | 重启后无录音 | 启动接收器 | 手动启动一次应用 |
+| 转录时间不准确 | 旧录音无侧车 JSON | 仅 v1.1.0+ 新录音含 `.opus.json`；旧块回退为文件名时间戳 |
 
 </details>
 
@@ -328,14 +385,15 @@ clawhark/
 │   │   │   └── MainActivity.kt             # 单按钮界面 (702行)
 │   │   │
 │   │   ├── 🎙️ 录音服务核心
-│   │   │   ├── RecordingService.kt         # 服务协调器 (244行)
-│   │   │   ├── AudioRecorder.kt            # 音频录制核心 (378行)
-│   │   │   ├── StreamingEncoder.kt         # PCM→AAC编码器 (170行)
-│   │   │   ├── ServiceConfig.kt            # 配置管理 (81行)
-│   │   │   ├── StorageManager.kt           # 存储管理 (82行)
-│   │   │   ├── UploadScheduler.kt          # 上传调度 (83行)
-│   │   │   ├── StatusLogger.kt             # 状态日志 (146行)
-│   │   │   └── RecordingNotificationManager.kt  # 通知管理 (83行)
+│   │   │   ├── RecordingService.kt         # 服务协调器
+│   │   │   ├── AudioRecorder.kt            # 音频录制、VAD、块切片
+│   │   │   ├── ChunkMetadata.kt            # 侧车 JSON 元数据（语音段时间轴）
+│   │   │   ├── StreamingEncoder.kt         # PCM→Opus 流式编码
+│   │   │   ├── ServiceConfig.kt            # 生产/调试配置
+│   │   │   ├── StorageManager.kt           # 存储管理与容量限制
+│   │   │   ├── UploadScheduler.kt          # 上传调度
+│   │   │   ├── StatusLogger.kt             # 状态日志
+│   │   │   └── RecordingNotificationManager.kt  # 通知管理
 │   │   │
 │   │   ├── ☁️ 云存储上传
 │   │   │   ├── UploadWorker.kt             # WorkManager后台上传
@@ -360,8 +418,8 @@ clawhark/
 │   └── README.md                           # 完整集成指南
 │
 ├── scripts/                                 # 自动化脚本
-│   ├── pull.sh                             # 从Drive拉取录音
-│   └── transcribe.py                       # 4阶段转录管道
+│   ├── pull.sh                             # 从云存储拉取录音（含 .opus.json）
+│   └── transcribe.py                       # 4 阶段转录管道（读取侧车元数据还原墙钟时间）
 │
 ├── store-listing/                          # Play Store资源
 ├── view-logs.ps1                           # Windows日志查看脚本
@@ -378,11 +436,12 @@ clawhark/
 | 文件 | 职责 | 关键功能 |
 |------|------|---------|
 | `RecordingService.kt` | **服务协调器** | 管理服务生命周期,协调各个模块,处理前台服务 |
-| `AudioRecorder.kt` | **录音核心** | 管理AudioRecord,实现VAD语音检测,处理音频流 |
-| `StreamingEncoder.kt` | **音频编码** | PCM→AAC实时编码,MediaCodec封装,临时文件管理 |
-| `ServiceConfig.kt` | **配置管理** | 生产/调试模式配置,参数集中管理 |
-| `StorageManager.kt` | **存储管理** | 文件清理,存储限制,孤立文件恢复 |
-| `UploadScheduler.kt` | **上传调度** | WorkManager定期上传,备用上传策略 |
+| `AudioRecorder.kt` | **录音核心** | 管理 AudioRecord,实现 VAD,按 15 分钟切块,跟踪语音段 |
+| `ChunkMetadata.kt` | **时间元数据** | 为每个 `.opus` 生成侧车 JSON,记录各段墙钟时间与音频偏移 |
+| `StreamingEncoder.kt` | **音频编码** | PCM→Opus 实时编码,MediaCodec + MediaMuxer |
+| `ServiceConfig.kt` | **配置管理** | 生产/调试模式配置,块时长、VAD、上传间隔 |
+| `StorageManager.kt` | **存储管理** | 文件清理,存储限制,孤立 .tmp 恢复 |
+| `UploadScheduler.kt` | **上传调度** | WorkManager 定期上传,备用上传策略 |
 | `StatusLogger.kt` | **状态日志** | 电池/网络/音频状态监控,定期状态报告 |
 | `RecordingNotificationManager.kt` | **通知管理** | 前台通知,动态文本轮换 |
 
@@ -390,11 +449,11 @@ clawhark/
 
 | 文件 | 职责 | 支持的存储 |
 |------|------|-----------|
-| `UploadWorker.kt` | 后台上传协调 | WiFi约束,重试机制,批量上传 |
-| `DriveUploader.kt` | Google Drive实现 | 使用Drive API v3,支持断点续传 |
-| `S3Uploader.kt` | S3兼容实现 | 支持七牛/阿里云/腾讯云等S3兼容服务 |
+| `UploadWorker.kt` | 后台上传协调 | WiFi 约束,重试机制;上传 `.opus` 及对应 `.opus.json` |
+| `DriveUploader.kt` | Google Drive 实现 | 使用 Drive API v3 |
+| `S3Uploader.kt` | S3 兼容实现 | 支持七牛/阿里云/腾讯云等 S3 兼容服务 |
 | `StorageUploader.kt` | 存储接口 | 统一上传接口,可扩展新存储后端 |
-| `AuthManager.kt` | OAuth认证 | 设备代码流程,token管理,自动刷新 |
+| `AuthManager.kt` | OAuth 认证 | 设备代码流程,token 管理,自动刷新 |
 
 #### 🛠️ 系统集成
 

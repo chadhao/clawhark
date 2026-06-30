@@ -148,10 +148,28 @@ class AudioRecorder(
         val pcmByteBuffer = ByteArray(READ_BUFFER_SAMPLES * 2)
         var encoder: StreamingEncoder? = null
         var pcmFed = 0L
+        var metadataBuilder: ChunkMetadata.Builder? = null
+        
+        fun finalizeChunkEncoder(): File? {
+            metadataBuilder?.closeOpenSegment()
+            val enc = encoder ?: return null
+            encoder = null
+            val builder = metadataBuilder
+            metadataBuilder = null
+            val encoded = enc.complete()
+            if (encoded != null) {
+                builder?.write()
+                AppLog.i(TAG, "块已完成: ${encoded.name} (${encoded.length()/1024}KB)")
+            } else {
+                AppLog.e(TAG, "块编码失败 - 数据丢失")
+            }
+            return encoded
+        }
         
         fun startNewChunk() {
             encoder?.release()
             encoder = null
+            metadataBuilder = null
             
             chunkStartTime = System.currentTimeMillis()
             hasVoiceInChunk = false
@@ -229,24 +247,29 @@ class AudioRecorder(
                                 .format(Date(chunkStartTime))
                             val opusFile = File(storageManager.getChunkDir(), "chunk_${timestamp}.opus")
                             encoder = StreamingEncoder(opusFile, SAMPLE_RATE, OPUS_BIT_RATE)
+                            metadataBuilder = ChunkMetadata.Builder(opusFile, chunkStartTime, SAMPLE_RATE)
                             AppLog.d(TAG, "编码器已创建: #$chunkNumber: ${opusFile.name}")
                         } catch (e: Exception) {
                             AppLog.e(TAG, "无法创建编码器 #$chunkNumber", e)
                         }
                     }
                     
+                    metadataBuilder?.onFeeding(lastVoiceTime)
                     encoder?.let { enc ->
                         try {
                             enc.feed(pcmByteBuffer, pcmBytes)
                             pcmFed += pcmBytes
+                            metadataBuilder?.addPcmBytes(pcmBytes)
                             totalBytesEncoded += pcmBytes
                         } catch (e: Exception) {
                             AppLog.e(TAG, "编码器feed错误 - 释放编码器", e)
                             enc.release()
                             encoder = null
+                            metadataBuilder = null
                         }
                     }
                 } else {
+                    metadataBuilder?.onLongSilence()
                     totalSilenceSkipped += read * 2
                 }
                 
@@ -262,16 +285,9 @@ class AudioRecorder(
                 if (now - chunkStartTime >= config.chunkDurationMs) {
                     AppLog.i(TAG, "块 #$chunkNumber 完成 (${(now - chunkStartTime)/1000}s). hasVoice=$hasVoiceInChunk pcmFed=${pcmFed/1024}KB")
                     
-                    val enc = encoder
-                    if (enc != null) {
+                    if (encoder != null) {
                         chunksWithVoice++
-                        encoder = null
-                        val encoded = enc.complete()
-                        if (encoded != null) {
-                            AppLog.i(TAG, "块已完成: ${encoded.name} (${encoded.length()/1024}KB)")
-                        } else {
-                            AppLog.e(TAG, "块编码失败 #$chunkNumber - 数据丢失")
-                        }
+                        finalizeChunkEncoder()
                     } else {
                         chunksWithoutVoice++
                         AppLog.d(TAG, "块 #$chunkNumber 静音 - 未创建编码器 ($chunksWithoutVoice 静音总计)")
@@ -285,17 +301,11 @@ class AudioRecorder(
             withContext(NonCancellable) {
                 AppLog.i(TAG, "录音循环: 最终化和清理")
                 
-                val finalEnc = encoder
-                if (finalEnc != null) {
-                    encoder = null
+                if (encoder != null) {
                     try {
-                        val encoded = finalEnc.complete()
-                        if (encoded != null) {
-                            AppLog.i(TAG, "最终块: ${encoded.name} (${encoded.length()/1024}KB)")
-                        }
+                        finalizeChunkEncoder()
                     } catch (e: Exception) {
                         AppLog.e(TAG, "最终块完成失败", e)
-                        finalEnc.release()
                     }
                 } else {
                     AppLog.d(TAG, "最终块无声音 - 无需完成编码器")
