@@ -76,6 +76,37 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val DEBOUNCE_MS = 600L
         const val CONFIRM_TIMEOUT_MS = 3000L
+
+        /** 本地待上传文件统计（音频 + 侧车元数据合计） */
+        data class LocalRecordingCounts(
+            val audioCount: Int,
+            val metadataCount: Int
+        ) {
+            val totalUploadCount: Int get() = audioCount + metadataCount
+
+            fun formatLabel(): String = "${totalUploadCount}文件"
+
+            fun formatPendingUpload(): String = "${totalUploadCount}文件待上传"
+        }
+
+        fun countLocalRecordings(dir: File): LocalRecordingCounts {
+            if (!dir.exists()) return LocalRecordingCounts(0, 0)
+            val files = dir.listFiles()?.filter {
+                it.isFile && !it.name.endsWith(".uploading")
+            } ?: emptyList()
+            return LocalRecordingCounts(
+                audioCount = files.count { it.name.endsWith(".opus") },
+                metadataCount = files.count { it.name.endsWith(".opus.json") }
+            )
+        }
+
+        fun localRecordingsSizeBytes(dir: File): Long {
+            if (!dir.exists()) return 0L
+            return dir.listFiles()?.filter {
+                it.isFile && !it.name.endsWith(".uploading") &&
+                    (it.name.endsWith(".opus") || it.name.endsWith(".opus.json"))
+            }?.sumOf { it.length() } ?: 0L
+        }
     }
 
     data class UIState(
@@ -480,11 +511,9 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
 
-                val files = recordingsDir.listFiles()?.filter { 
-                    it.isFile && it.name.endsWith(".opus") && !it.name.endsWith(".uploading")
-                } ?: emptyList()
+                val counts = countLocalRecordings(recordingsDir)
 
-                if (files.isEmpty()) {
+                if (counts.audioCount == 0) {
                     withContext(Dispatchers.Main) {
                         uiState = uiState.copy(uploadStatus = "无待上传文件")
                     }
@@ -492,17 +521,16 @@ class MainActivity : ComponentActivity() {
                 }
 
                 withContext(Dispatchers.Main) {
-                    uiState = uiState.copy(uploadStatus = "上传中: 0/${files.size}")
+                    uiState = uiState.copy(uploadStatus = "上传中: 0/${counts.totalUploadCount}")
                 }
 
                 val uploadRequest = OneTimeWorkRequestBuilder<UploadWorker>().build()
                 WorkManager.getInstance(this@MainActivity).enqueue(uploadRequest)
 
-                files.forEachIndexed { index, _ ->
+                repeat(counts.totalUploadCount) { index ->
                     delay(500)
-                    val uploaded = index + 1
                     withContext(Dispatchers.Main) {
-                        uiState = uiState.copy(uploadStatus = "上传中: $uploaded/${files.size}")
+                        uiState = uiState.copy(uploadStatus = "上传中: ${index + 1}/${counts.totalUploadCount}")
                     }
                 }
 
@@ -617,13 +645,8 @@ class MainActivity : ComponentActivity() {
         val isDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
 
         val recordingsDir = File(filesDir, "recordings")
-        val localFileCount = if (recordingsDir.exists()) {
-            recordingsDir.listFiles()?.count { 
-                it.isFile && it.name.endsWith(".opus")
-            } ?: 0
-        } else {
-            0
-        }
+        val localCounts = countLocalRecordings(recordingsDir)
+        val localFileLabel = localCounts.formatLabel()
 
         val svc = service
         if (svc != null && svc.isCurrentlyRecording()) {
@@ -637,26 +660,23 @@ class MainActivity : ComponentActivity() {
                 isRecording = true,
                 statusText = if (!confirmPending) "录音中" else "再次点击停止",
                 statusColor = Color(0xFFCC3333),
-                infoText = "${hrs}小时${m}分钟 | ${localFileCount}文件\n${mb} MB | $storageInfo",
+                infoText = "${hrs}小时${m}分钟 | $localFileLabel\n${mb} MB | $storageInfo",
                 storageInfo = storageInfo,
                 isDebugMode = isDebugMode
             )
         } else {
             confirmPending = false
-            val mb = if (recordingsDir.exists()) {
-                val totalSize = recordingsDir.listFiles()?.filter { 
-                    it.isFile && it.name.endsWith(".opus")
-                }?.sumOf { it.length() } ?: 0L
-                String.format("%.1f", totalSize / 1024.0 / 1024.0)
-            } else {
-                "0.0"
-            }
+            val mb = String.format("%.1f", localRecordingsSizeBytes(recordingsDir) / 1024.0 / 1024.0)
             
             uiState = uiState.copy(
                 isRecording = false,
                 statusText = "已停止",
                 statusColor = Color(0xFF888888),
-                infoText = if (localFileCount > 0) "${localFileCount}文件待上传 | ${mb} MB" else "点击开始录音",
+                infoText = if (localCounts.totalUploadCount > 0) {
+                    "${localCounts.formatPendingUpload()} | ${mb} MB"
+                } else {
+                    "点击开始录音"
+                },
                 confirmPending = false,
                 storageInfo = storageInfo,
                 isDebugMode = isDebugMode

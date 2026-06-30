@@ -20,7 +20,8 @@ class StorageManager(
     
     fun getRecordings(): List<File> {
         return getChunkDir().listFiles()?.filter {
-            it.extension == "opus" || it.extension == "m4a"
+            it.isFile && !it.name.endsWith(".uploading") &&
+                (it.name.endsWith(".opus") || it.name.endsWith(".opus.json") || it.extension == "m4a")
         }?.sortedBy { it.name } ?: emptyList()
     }
     

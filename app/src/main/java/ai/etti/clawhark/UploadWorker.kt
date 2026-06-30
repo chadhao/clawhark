@@ -57,6 +57,9 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             }
         }
 
+        val sidecarCount = files.count { ChunkMetadata.sidecarFileFor(it).exists() }
+        val totalUploadCount = files.size + sidecarCount
+
         // 在 Wear OS 上请求高带宽网络(Wi-Fi)
         val networkManager = WearNetworkManager(applicationContext)
         val currentNetwork = networkManager.getCurrentNetworkInfo()
@@ -76,8 +79,11 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         
         AppLog.i(TAG, "高带宽网络已就绪,开始上传")
 
-        AppLog.i(TAG, "上传 worker 已启动 — ${files.size} 个文件待上传 (${uploader.getStorageInfo()})")
-        var succeeded = 0
+        AppLog.i(TAG, "上传 worker 已启动 — ${files.size} 个音频" +
+            (if (sidecarCount > 0) " + $sidecarCount 个元数据" else "") +
+            ", 共 $totalUploadCount 个文件 (${uploader.getStorageInfo()})")
+        var audioSucceeded = 0
+        var sidecarSucceeded = 0
         var failed = 0
         var consecutiveFailures = 0
 
@@ -105,16 +111,18 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                             val sidecarOk = uploader.uploadFile(uploadingSidecar)
                             if (sidecarOk) {
                                 uploadingSidecar.delete()
+                                sidecarSucceeded++
                                 AppLog.i(TAG, "侧车元数据已上传: ${sidecar.name}")
                             } else {
                                 uploadingSidecar.renameTo(sidecar)
+                                failed++
                                 AppLog.w(TAG, "侧车元数据上传失败: ${sidecar.name}")
                             }
                         }
                     }
-                    succeeded++
+                    audioSucceeded++
                     consecutiveFailures = 0
-                    AppLog.i(TAG, "上传成功: ${file.name} 耗时 ${elapsed}ms ($succeeded/${files.size})")
+                    AppLog.i(TAG, "上传成功: ${file.name} 耗时 ${elapsed}ms (音频 $audioSucceeded/${files.size})")
                 } else {
                     // 重命名回来以便下次重试
                     if (!uploadingFile.renameTo(file)) {
@@ -134,7 +142,13 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             AppLog.d(TAG, "网络资源已释放")
         }
 
-        AppLog.i(TAG, "上传 worker 完成 — $succeeded 成功, $failed 失败,共 ${files.size} 个")
+        val summary = buildString {
+            append("上传 worker 完成 — 音频 $audioSucceeded/${files.size} 成功")
+            if (sidecarCount > 0) append(", 元数据 $sidecarSucceeded/$sidecarCount 成功")
+            if (failed > 0) append(", $failed 失败")
+            append(", 共 $totalUploadCount 个文件")
+        }
+        AppLog.i(TAG, summary)
         return if (failed == 0) Result.success() else Result.retry()
     }
 
