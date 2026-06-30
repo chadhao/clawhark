@@ -19,8 +19,12 @@ class WearNetworkManager(private val context: Context) {
 
     suspend fun requestHighBandwidthNetwork(): NetworkResult {
         if (isHighBandwidthAvailable()) {
-            AppLog.d(TAG, "高带宽网络已可用,无需请求")
-            return NetworkResult.AlreadyAvailable
+            val network = connectivityManager.activeNetwork
+            if (network != null) {
+                AppLog.d(TAG, "高带宽网络已可用,无需请求")
+                connectivityManager.bindProcessToNetwork(network)
+                return NetworkResult.Connected(network)
+            }
         }
 
         AppLog.i(TAG, "请求高带宽网络(Wi-Fi)...")

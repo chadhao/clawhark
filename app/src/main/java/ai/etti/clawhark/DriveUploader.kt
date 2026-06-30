@@ -1,5 +1,6 @@
 package ai.etti.clawhark
 
+import android.net.Network
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -9,14 +10,13 @@ import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
-import java.net.URL
 import java.util.UUID
 
 /**
  * 上传文件到 Google Drive 的 "ClawHark" 文件夹。
  * 使用 AuthManager 进行 OAuth 认证 — 此处不存储凭证。
  */
-class DriveUploader : StorageUploader {
+class DriveUploader(private val network: Network? = null) : StorageUploader {
 
     companion object {
         const val TAG = "Drive"
@@ -43,7 +43,7 @@ class DriveUploader : StorageUploader {
         var conn: HttpURLConnection? = null
         try {
             val searchUrl = "https://www.googleapis.com/drive/v3/files?q=name%3D%27$FOLDER_NAME%27+and+mimeType%3D%27application%2Fvnd.google-apps.folder%27+and+trashed%3Dfalse&fields=files(id)"
-            conn = URL(searchUrl).openConnection() as HttpURLConnection
+            conn = NetworkHttp.openConnection(searchUrl, network)
             conn.setRequestProperty("Authorization", "Bearer $token")
             conn.connectTimeout = CONNECT_TIMEOUT
             conn.readTimeout = READ_TIMEOUT
@@ -72,7 +72,7 @@ class DriveUploader : StorageUploader {
         // Create folder
         var createConn: HttpURLConnection? = null
         try {
-            createConn = URL("https://www.googleapis.com/drive/v3/files").openConnection() as HttpURLConnection
+            createConn = NetworkHttp.openConnection("https://www.googleapis.com/drive/v3/files", network)
             createConn.setRequestProperty("Authorization", "Bearer $token")
             createConn.setRequestProperty("Content-Type", "application/json")
             createConn.requestMethod = "POST"
@@ -107,7 +107,7 @@ class DriveUploader : StorageUploader {
         val fileSize = file.length()
         AppLog.i(TAG, "=== UPLOAD START: ${file.name} (${fileSize/1024}KB) ===")
 
-        val token = AuthManager.getAccessToken()
+        val token = AuthManager.getAccessToken(network)
         if (token == null) {
             AppLog.e(TAG, "Upload aborted: no access token")
             return@withContext false
@@ -123,7 +123,7 @@ class DriveUploader : StorageUploader {
         try {
             val boundary = "----ClawHark${UUID.randomUUID()}"
             val url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
-            conn = URL(url).openConnection() as HttpURLConnection
+            conn = NetworkHttp.openConnection(url, network)
             conn.setRequestProperty("Authorization", "Bearer $token")
             conn.setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
             conn.requestMethod = "POST"
@@ -132,9 +132,11 @@ class DriveUploader : StorageUploader {
             conn.readTimeout = READ_TIMEOUT
             conn.setChunkedStreamingMode(0)
 
+            val cleanName = file.name.removeSuffix(".uploading")
+            val contentType = if (cleanName.endsWith(".json")) "application/json" else "audio/mp4"
+
             val metadata = JSONObject().apply {
-                // 移除 .uploading 后缀(如果存在)以获得正确的文件名
-                put("name", file.name.removeSuffix(".uploading"))
+                put("name", cleanName)
                 put("parents", JSONArray().put(folder))
             }
 
@@ -149,7 +151,7 @@ class DriveUploader : StorageUploader {
                 writeStr("Content-Type: application/json; charset=UTF-8\r\n\r\n")
                 writeStr(metadata.toString())
                 writeStr("\r\n--$boundary\r\n")
-                writeStr("Content-Type: audio/mp4\r\n\r\n")
+                writeStr("Content-Type: $contentType\r\n\r\n")
 
                 var uploaded = 0L
                 FileInputStream(file).use { fis ->

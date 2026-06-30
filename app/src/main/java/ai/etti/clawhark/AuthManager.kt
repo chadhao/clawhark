@@ -2,6 +2,7 @@ package ai.etti.clawhark
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Network
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import kotlinx.coroutines.Dispatchers
@@ -318,7 +319,7 @@ object AuthManager {
      * Uses Mutex to prevent concurrent refresh races.
      * Returns null if not authenticated or refresh fails.
      */
-    suspend fun getAccessToken(): String? {
+    suspend fun getAccessToken(network: Network? = null): String? {
         val refreshToken = requirePrefs().getString(PREF_REFRESH_TOKEN, null)
         if (refreshToken == null) {
             AppLog.w(TAG, "No refresh token — not authenticated")
@@ -340,15 +341,15 @@ object AuthManager {
             if (recheckedToken != null && System.currentTimeMillis() < recheckedExpiry - 120_000) {
                 return@withLock recheckedToken
             }
-            refreshAccessToken(refreshToken)
+            refreshAccessToken(refreshToken, network)
         }
     }
 
-    private suspend fun refreshAccessToken(refreshToken: String): String? = withContext(Dispatchers.IO) {
+    private suspend fun refreshAccessToken(refreshToken: String, network: Network? = null): String? = withContext(Dispatchers.IO) {
         AppLog.d(TAG, "Refreshing access token...")
         var conn: HttpURLConnection? = null
         try {
-            conn = URL("https://oauth2.googleapis.com/token").openConnection() as HttpURLConnection
+            conn = NetworkHttp.openConnection("https://oauth2.googleapis.com/token", network)
             conn.requestMethod = "POST"
             conn.doOutput = true
             conn.connectTimeout = CONNECT_TIMEOUT

@@ -32,8 +32,9 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.*
 import androidx.work.WorkManager
-import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -47,9 +48,6 @@ class MainActivity : ComponentActivity() {
 
     private var lastToggleTime = 0L
     private var lastAuthTapTime = 0L
-
-    private var confirmPending = false
-    private var confirmResetJob: Job? = null
 
     private var dotCount = 0
 
@@ -77,7 +75,6 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val DEBOUNCE_MS = 600L
-        const val CONFIRM_TIMEOUT_MS = 3000L
 
         /** 本地待上传文件统计（音频 + 侧车元数据合计） */
         data class LocalRecordingCounts(
@@ -125,7 +122,6 @@ class MainActivity : ComponentActivity() {
         val authBtnText: String = "关联",
         val authBtnEnabled: Boolean = true,
         val storageInfo: String = "Drive",
-        val confirmPending: Boolean = false,
         val uploadStatus: String = "",
         val isDebugMode: Boolean = false,
         val pauseOnCharge: Boolean = true,
@@ -207,7 +203,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         authPollingJob?.cancel()
-        confirmResetJob?.cancel()
         scope.cancel()
         super.onDestroy()
     }
@@ -277,7 +272,7 @@ class MainActivity : ComponentActivity() {
                 )
             ) {
                 Text(
-                    text = if (uiState.confirmPending) "确定?" else if (uiState.sessionActive) "停止" else "开始",
+                    text = if (uiState.sessionActive) "停止" else "开始",
                     style = MaterialTheme.typography.button
                 )
             }
@@ -638,55 +633,75 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun manualUploadAll() {
-        scope.launch(Dispatchers.IO) {
+        scope.launch {
             try {
                 val recordingsDir = File(filesDir, "recordings")
-                if (!recordingsDir.exists()) {
-                    withContext(Dispatchers.Main) {
-                        uiState = uiState.copy(uploadStatus = "无录音文件")
-                    }
+                val counts = withContext(Dispatchers.IO) {
+                    if (!recordingsDir.exists()) return@withContext null
+                    countLocalRecordings(recordingsDir)
+                }
+
+                if (counts == null) {
+                    uiState = uiState.copy(uploadStatus = "无录音文件")
+                    clearUploadStatusAfterDelay()
                     return@launch
                 }
 
-                val counts = countLocalRecordings(recordingsDir)
-
-                if (counts.audioCount == 0) {
-                    withContext(Dispatchers.Main) {
-                        uiState = uiState.copy(uploadStatus = "无待上传文件")
-                    }
+                if (counts.totalUploadCount == 0) {
+                    uiState = uiState.copy(uploadStatus = "无待上传文件")
+                    clearUploadStatusAfterDelay()
                     return@launch
                 }
 
-                withContext(Dispatchers.Main) {
-                    uiState = uiState.copy(uploadStatus = "上传中: 0/${counts.totalUploadCount}")
+                uiState = uiState.copy(uploadStatus = "准备上传...")
+
+                val scheduler = UploadScheduler(this@MainActivity, ServiceConfig.load(this@MainActivity))
+                scheduler.triggerImmediateUpload()
+
+                val wm = WorkManager.getInstance(this@MainActivity)
+                val finished = withTimeoutOrNull(5 * 60_000L) {
+                    wm.getWorkInfosForUniqueWorkFlow(UploadScheduler.IMMEDIATE_WORK_NAME)
+                        .first { infos ->
+                            infos.isNotEmpty() && infos[0].state.isFinished
+                        }
                 }
 
-                val uploadRequest = OneTimeWorkRequestBuilder<UploadWorker>().build()
-                WorkManager.getInstance(this@MainActivity).enqueue(uploadRequest)
-
-                repeat(counts.totalUploadCount) { index ->
-                    delay(500)
-                    withContext(Dispatchers.Main) {
-                        uiState = uiState.copy(uploadStatus = "上传中: ${index + 1}/${counts.totalUploadCount}")
+                val state = finished?.firstOrNull()?.state
+                when (state) {
+                    WorkInfo.State.SUCCEEDED -> {
+                        uiState = uiState.copy(uploadStatus = "上传完成")
+                        updateUIState()
+                    }
+                    WorkInfo.State.FAILED -> {
+                        uiState = uiState.copy(uploadStatus = "上传失败")
+                        Toast.makeText(this@MainActivity, "上传失败", Toast.LENGTH_SHORT).show()
+                    }
+                    WorkInfo.State.CANCELLED -> {
+                        uiState = uiState.copy(uploadStatus = "上传已取消")
+                    }
+                    null -> {
+                        uiState = uiState.copy(uploadStatus = "上传超时")
+                        Toast.makeText(this@MainActivity, "上传超时", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {
+                        uiState = uiState.copy(uploadStatus = "上传结束")
                     }
                 }
-
-                delay(1000)
-                withContext(Dispatchers.Main) {
-                    uiState = uiState.copy(uploadStatus = "已加入上传队列")
-                }
-                delay(3000)
-                withContext(Dispatchers.Main) {
-                    uiState = uiState.copy(uploadStatus = "")
-                }
+                clearUploadStatusAfterDelay()
 
             } catch (e: Exception) {
                 AppLog.e("Upload", "Manual upload failed", e)
-                withContext(Dispatchers.Main) {
-                    uiState = uiState.copy(uploadStatus = "上传失败")
-                    Toast.makeText(this@MainActivity, "上传失败", Toast.LENGTH_SHORT).show()
-                }
+                uiState = uiState.copy(uploadStatus = "上传失败")
+                Toast.makeText(this@MainActivity, "上传失败", Toast.LENGTH_SHORT).show()
+                clearUploadStatusAfterDelay()
             }
+        }
+    }
+
+    private fun clearUploadStatusAfterDelay() {
+        scope.launch {
+            delay(3000)
+            uiState = uiState.copy(uploadStatus = "")
         }
     }
 
@@ -765,28 +780,11 @@ class MainActivity : ComponentActivity() {
             else -> false
         }
         if (!sessionActive) {
-            confirmPending = false
-            confirmResetJob?.cancel()
             prefs.edit().putBoolean(RecordingService.PREF_SHOULD_RECORD, true).apply()
             val intent = Intent(this, RecordingService::class.java)
             startForegroundService(intent)
             doBind(intent)
         } else {
-            if (!confirmPending) {
-                confirmPending = true
-                uiState = uiState.copy(
-                    statusText = "再次点击停止",
-                    confirmPending = true
-                )
-                confirmResetJob = scope.launch {
-                    delay(CONFIRM_TIMEOUT_MS)
-                    confirmPending = false
-                    updateUI()
-                }
-                return
-            }
-            confirmPending = false
-            confirmResetJob?.cancel()
             prefs.edit().putBoolean(RecordingService.PREF_SHOULD_RECORD, false).apply()
             val intent = Intent(this, RecordingService::class.java).apply {
                 action = RecordingService.ACTION_STOP
@@ -825,7 +823,7 @@ class MainActivity : ComponentActivity() {
                 isRecording = false,
                 sessionActive = true,
                 isPausedForCharging = true,
-                statusText = if (!confirmPending) "充电暂停" else "再次点击停止",
+                statusText = "充电暂停",
                 statusColor = Color(0xFFFFAA00),
                 infoText = if (localCounts.totalUploadCount > 0) {
                     "拔电后自动恢复\n${localCounts.formatPendingUpload()} | ${mb} MB"
@@ -849,7 +847,7 @@ class MainActivity : ComponentActivity() {
                 isRecording = true,
                 sessionActive = true,
                 isPausedForCharging = false,
-                statusText = if (!confirmPending) "录音中" else "再次点击停止",
+                statusText = "录音中",
                 statusColor = Color(0xFFCC3333),
                 infoText = "${hrs}小时${m}分钟 | $localFileLabel\n${mb} MB | $storageInfo",
                 storageInfo = storageInfo,
@@ -859,7 +857,6 @@ class MainActivity : ComponentActivity() {
                 opusBitRateLabel = OpusBitRate.labelFor(opusBitRate)
             )
         } else {
-            confirmPending = false
             val mb = String.format("%.1f", localRecordingsSizeBytes(recordingsDir) / 1024.0 / 1024.0)
             
             uiState = uiState.copy(
@@ -873,7 +870,6 @@ class MainActivity : ComponentActivity() {
                 } else {
                     "点击开始录音"
                 },
-                confirmPending = false,
                 storageInfo = storageInfo,
                 isDebugMode = isDebugMode,
                 pauseOnCharge = pauseOnCharge,

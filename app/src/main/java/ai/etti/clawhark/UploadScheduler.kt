@@ -17,6 +17,7 @@ class UploadScheduler(
     companion object {
         private const val TAG = "UploadScheduler"
         const val UPLOAD_FALLBACK_WORK_NAME = "upload_fallback"
+        const val IMMEDIATE_WORK_NAME = "upload_immediate"
     }
     
     fun schedulePeriodicUploads() {
@@ -73,7 +74,7 @@ class UploadScheduler(
     fun triggerImmediateUpload() {
         val oneTimeWork = OneTimeWorkRequestBuilder<UploadWorker>().build()
         WorkManager.getInstance(context).enqueueUniqueWork(
-            "upload_immediate",
+            IMMEDIATE_WORK_NAME,
             ExistingWorkPolicy.REPLACE,
             oneTimeWork
         )
