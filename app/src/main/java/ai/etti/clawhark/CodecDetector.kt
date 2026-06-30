@@ -21,7 +21,7 @@ object CodecDetector {
         val maxChannels: Int?
     )
     
-    fun detectAndLog() {
+    fun detectAndLog(opusBitRate: Int = OpusBitRate.DEFAULT_BIT_RATE) {
         AppLog.i(TAG, "==================== 开始检测编解码器 ====================")
         
         val audioEncoders = detectAudioEncoders()
@@ -29,7 +29,7 @@ object CodecDetector {
         
         logEncoders(audioEncoders)
         logDecoders(audioDecoders)
-        logSummary(audioEncoders, audioDecoders)
+        logSummary(audioEncoders, audioDecoders, opusBitRate)
         
         AppLog.i(TAG, "==================== 编解码器检测完成 ====================")
     }
@@ -173,7 +173,7 @@ object CodecDetector {
         }
     }
     
-    private fun logSummary(encoders: List<CodecInfo>, decoders: List<CodecInfo>) {
+    private fun logSummary(encoders: List<CodecInfo>, decoders: List<CodecInfo>, opusBitRate: Int) {
         AppLog.i(TAG, "")
         AppLog.i(TAG, "========== 关键编码器支持情况 ==========")
         
@@ -191,7 +191,7 @@ object CodecDetector {
         AppLog.i(TAG, "========== 当前应用配置 ==========")
         AppLog.i(TAG, "  使用编码: Opus (${MediaFormat.MIMETYPE_AUDIO_OPUS})")
         AppLog.i(TAG, "  采样率: ${AudioRecorder.SAMPLE_RATE} Hz")
-        AppLog.i(TAG, "  码率: ${AudioRecorder.OPUS_BIT_RATE/1000} kbps")
+        AppLog.i(TAG, "  码率: ${opusBitRate / 1000} kbps")
         
         if (opusEncoders.isEmpty()) {
             AppLog.w(TAG, "  ✗ 设备不支持Opus编码器")

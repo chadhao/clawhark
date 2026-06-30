@@ -13,7 +13,8 @@ data class ServiceConfig(
     val minFreeSpaceBytes: Long,
     val maxLocalStorageBytes: Long,
     val staleTmpThresholdMs: Long,
-    val isDebugMode: Boolean
+    val isDebugMode: Boolean,
+    val opusBitRate: Int
 ) {
     companion object {
         const val PREF_FILE = "clawhark"
@@ -45,7 +46,8 @@ data class ServiceConfig(
         fun load(context: Context): ServiceConfig {
             val isDebugMode = context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
                 .getBoolean(PREF_DEBUG_MODE, false)
-                
+            val opusBitRate = OpusBitRate.loadBitRate(context)
+
             return if (isDebugMode) {
                 ServiceConfig(
                     chunkDurationMs = CHUNK_DURATION_MS_DEBUG,
@@ -58,7 +60,8 @@ data class ServiceConfig(
                     minFreeSpaceBytes = MIN_FREE_SPACE_BYTES_DEBUG,
                     maxLocalStorageBytes = MAX_LOCAL_STORAGE_BYTES_DEBUG,
                     staleTmpThresholdMs = STALE_TMP_THRESHOLD_MS_DEBUG,
-                    isDebugMode = true
+                    isDebugMode = true,
+                    opusBitRate = opusBitRate
                 )
             } else {
                 ServiceConfig(
@@ -72,7 +75,8 @@ data class ServiceConfig(
                     minFreeSpaceBytes = MIN_FREE_SPACE_BYTES_PROD,
                     maxLocalStorageBytes = MAX_LOCAL_STORAGE_BYTES_PROD,
                     staleTmpThresholdMs = STALE_TMP_THRESHOLD_MS_PROD,
-                    isDebugMode = false
+                    isDebugMode = false,
+                    opusBitRate = opusBitRate
                 )
             }
         }

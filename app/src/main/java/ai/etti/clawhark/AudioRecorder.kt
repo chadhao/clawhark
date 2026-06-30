@@ -19,7 +19,6 @@ class AudioRecorder(
     companion object {
         private const val TAG = "AudioRecorder"
         const val SAMPLE_RATE = 16000
-        const val OPUS_BIT_RATE = 16000
         const val READ_BUFFER_SAMPLES = 16384
         const val MIC_RECOVERY_MAX_RETRIES = 5
     }
@@ -95,7 +94,7 @@ class AudioRecorder(
         try {
             audioRecord?.startRecording()
             isRecording = true
-            AppLog.i(TAG, "=== 录音已开始 === sampleRate=$SAMPLE_RATE chunkDuration=${config.chunkDurationMs/1000}s vadThreshold=${config.vadThreshold} codec=Opus@${OPUS_BIT_RATE/1000}kbps")
+            AppLog.i(TAG, "=== 录音已开始 === sampleRate=$SAMPLE_RATE chunkDuration=${config.chunkDurationMs/1000}s vadThreshold=${config.vadThreshold} codec=Opus@${config.opusBitRate/1000}kbps")
         } catch (e: Exception) {
             AppLog.e(TAG, "致命错误: AudioRecord.startRecording()失败", e)
             isRecording = false
@@ -246,7 +245,7 @@ class AudioRecorder(
                             val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
                                 .format(Date(chunkStartTime))
                             val opusFile = File(storageManager.getChunkDir(), "chunk_${timestamp}.opus")
-                            encoder = StreamingEncoder(opusFile, SAMPLE_RATE, OPUS_BIT_RATE)
+                            encoder = StreamingEncoder(opusFile, SAMPLE_RATE, config.opusBitRate)
                             metadataBuilder = ChunkMetadata.Builder(opusFile, chunkStartTime, SAMPLE_RATE)
                             AppLog.d(TAG, "编码器已创建: #$chunkNumber: ${opusFile.name}")
                         } catch (e: Exception) {

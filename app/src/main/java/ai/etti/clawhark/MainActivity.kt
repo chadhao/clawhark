@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
 
     private var uiState by mutableStateOf(UIState())
     private var showSettings by mutableStateOf(false)
+    private var showBitRatePicker by mutableStateOf(false)
     
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -127,7 +128,9 @@ class MainActivity : ComponentActivity() {
         val confirmPending: Boolean = false,
         val uploadStatus: String = "",
         val isDebugMode: Boolean = false,
-        val pauseOnCharge: Boolean = true
+        val pauseOnCharge: Boolean = true,
+        val opusBitRate: Int = OpusBitRate.DEFAULT_BIT_RATE,
+        val opusBitRateLabel: String = OpusBitRate.labelFor(OpusBitRate.DEFAULT_BIT_RATE)
     )
 
     private val connection = object : ServiceConnection {
@@ -231,10 +234,10 @@ class MainActivity : ComponentActivity() {
                 state = listState
             ) {
                 if (uiState.isAuthenticated) {
-                    if (showSettings) {
-                        item { SettingsScreen() }
-                    } else {
-                        item { RecordingScreen() }
+                    when {
+                        showBitRatePicker -> item { BitRateSettingsScreen() }
+                        showSettings -> item { SettingsScreen() }
+                        else -> item { RecordingScreen() }
                     }
                 } else {
                     item { AuthScreen() }
@@ -334,6 +337,23 @@ class MainActivity : ComponentActivity() {
             }
 
             Button(
+                onClick = { showBitRatePicker = true },
+                enabled = !uiState.sessionActive,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFF444444),
+                    disabledBackgroundColor = Color(0xFF222222)
+                )
+            ) {
+                Text(
+                    text = "码率: ${uiState.opusBitRateLabel}",
+                    style = MaterialTheme.typography.caption1
+                )
+            }
+
+            Button(
                 onClick = { manualUploadAll() },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -381,6 +401,55 @@ class MainActivity : ComponentActivity() {
 
             Button(
                 onClick = { showSettings = false },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF333333))
+            ) {
+                Text("返回", style = MaterialTheme.typography.caption1)
+            }
+        }
+    }
+
+    @Composable
+    fun BitRateSettingsScreen() {
+        val haptic = LocalHapticFeedback.current
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "录音码率",
+                color = Color.White,
+                style = MaterialTheme.typography.title3,
+                textAlign = TextAlign.Center
+            )
+
+            for (option in OpusBitRate.OPTIONS) {
+                val selected = option.bitRate == uiState.opusBitRate
+                Button(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        saveBitRate(option.bitRate)
+                        showBitRatePicker = false
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = if (selected) Color(0xFFAA6639) else Color(0xFF444444)
+                    )
+                ) {
+                    Text(
+                        text = "${option.label} (${option.hint})",
+                        style = MaterialTheme.typography.caption1
+                    )
+                }
+            }
+
+            Button(
+                onClick = { showBitRatePicker = false },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(40.dp),
@@ -461,11 +530,14 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
         val isDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
         val pauseOnCharge = prefs.getBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, true)
+        val opusBitRate = OpusBitRate.loadBitRate(this)
 
         uiState = uiState.copy(
             isAuthenticated = AuthManager.isAuthenticated() || storageType == StorageType.S3,
             isDebugMode = isDebugMode,
-            pauseOnCharge = pauseOnCharge
+            pauseOnCharge = pauseOnCharge,
+            opusBitRate = opusBitRate,
+            opusBitRateLabel = OpusBitRate.labelFor(opusBitRate)
         )
     }
 
@@ -659,6 +731,16 @@ class MainActivity : ComponentActivity() {
         updateUI()
     }
 
+    private fun saveBitRate(bitRate: Int) {
+        OpusBitRate.saveBitRate(this, bitRate)
+        uiState = uiState.copy(
+            opusBitRate = bitRate,
+            opusBitRateLabel = OpusBitRate.labelFor(bitRate)
+        )
+        Toast.makeText(this, "码率已设为 ${OpusBitRate.labelFor(bitRate)}\n重启录音后生效", Toast.LENGTH_LONG).show()
+        AppLog.i("MainActivity", "码率已更新: $bitRate (需要重启录音)")
+    }
+
     private fun toggleDebugMode() {
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
         val currentDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
@@ -730,6 +812,7 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
         val isDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
         val pauseOnCharge = prefs.getBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, true)
+        val opusBitRate = OpusBitRate.loadBitRate(this)
 
         val recordingsDir = File(filesDir, "recordings")
         val localCounts = countLocalRecordings(recordingsDir)
@@ -751,7 +834,9 @@ class MainActivity : ComponentActivity() {
                 },
                 storageInfo = storageInfo,
                 isDebugMode = isDebugMode,
-                pauseOnCharge = pauseOnCharge
+                pauseOnCharge = pauseOnCharge,
+                opusBitRate = opusBitRate,
+                opusBitRateLabel = OpusBitRate.labelFor(opusBitRate)
             )
         } else if (svc != null && svc.isCurrentlyRecording()) {
             val elapsed = System.currentTimeMillis() - svc.recordingStartTime
@@ -769,7 +854,9 @@ class MainActivity : ComponentActivity() {
                 infoText = "${hrs}小时${m}分钟 | $localFileLabel\n${mb} MB | $storageInfo",
                 storageInfo = storageInfo,
                 isDebugMode = isDebugMode,
-                pauseOnCharge = pauseOnCharge
+                pauseOnCharge = pauseOnCharge,
+                opusBitRate = opusBitRate,
+                opusBitRateLabel = OpusBitRate.labelFor(opusBitRate)
             )
         } else {
             confirmPending = false
@@ -789,7 +876,9 @@ class MainActivity : ComponentActivity() {
                 confirmPending = false,
                 storageInfo = storageInfo,
                 isDebugMode = isDebugMode,
-                pauseOnCharge = pauseOnCharge
+                pauseOnCharge = pauseOnCharge,
+                opusBitRate = opusBitRate,
+                opusBitRateLabel = OpusBitRate.labelFor(opusBitRate)
             )
         }
     }
