@@ -35,17 +35,15 @@ import java.net.URL
  *   - 应用程序类型: "TV 和受限输入设备"
  *   - 此类型不需要 client_secret
  *   - 为项目启用 Google Drive API
- *   - 在 assets/oauth_config.json 中设置配置
+ *   - 在 clawhark.jsonc 中设置配置（参考 clawhark.jsonc.example）
  */
 object AuthManager {
     private const val TAG = "Auth"
 
     private var storageConfig: StorageConfig? = null
+    private var storageFingerprint: String = ""
 
-    // OAuth 凭证在运行时从 assets/oauth_config.json 加载
-    // 参考 oauth_config.json.example 了解格式
-    // 创建你自己的: https://console.cloud.google.com/apis/credentials
-    // 应用程序类型: "TV 和受限输入设备"
+    // OAuth 凭证在运行时从 clawhark.jsonc 加载
     private var CLIENT_ID = ""
     private var CLIENT_SECRET = ""
 
@@ -67,20 +65,9 @@ object AuthManager {
         if (prefs != null) return
         val appContext = context.applicationContext
 
-        // 从 assets 加载存储配置
-        storageConfig = StorageConfig.loadFromAssets(appContext)
-        if (storageConfig == null || !storageConfig!!.validate()) {
-            AppLog.e(TAG, "存储配置无效或缺失 — 功能将受限")
-        }
+        ClawHarkConfig.migrateIfNeeded(appContext)
+        applyStorageFromConfig(appContext)
 
-        // 如果使用 Google Drive,加载 OAuth 配置
-        if (storageConfig?.storageType == StorageType.GOOGLE_DRIVE) {
-            storageConfig?.googleDriveConfig?.let { gdConfig ->
-                CLIENT_ID = gdConfig.clientId
-                CLIENT_SECRET = gdConfig.clientSecret
-                AppLog.i(TAG, "Google Drive OAuth 配置已加载 (client_id 末尾 ...${CLIENT_ID.takeLast(12)})")
-            }
-        }
         try {
             val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
             prefs = EncryptedSharedPreferences.create(
@@ -110,6 +97,42 @@ object AuthManager {
     }
 
     fun getStorageConfig(): StorageConfig? = storageConfig
+
+    /** 配置保存后热加载；存储凭证变更时清除 OAuth 会话 */
+    fun reloadStorageConfig(context: Context, clearAuthOnChange: Boolean = true): Boolean {
+        val appContext = context.applicationContext
+        val fullConfig = ClawHarkConfig.reload(appContext)
+        val newFingerprint = ClawHarkConfig.storageFingerprint(fullConfig)
+        val changed = newFingerprint != storageFingerprint
+        if (changed && clearAuthOnChange && prefs != null) {
+            clearAuth()
+            AppLog.i(TAG, "存储配置已变更 — OAuth 会话已清除")
+        }
+        applyStorageFromConfig(appContext)
+        return changed
+    }
+
+    private fun applyStorageFromConfig(context: Context) {
+        val fullConfig = ClawHarkConfig.load(context)
+        storageConfig = fullConfig.toStorageConfig()
+        storageFingerprint = ClawHarkConfig.storageFingerprint(fullConfig)
+
+        if (storageConfig == null || !storageConfig!!.validate()) {
+            AppLog.e(TAG, "存储配置无效或缺失 — 功能将受限")
+        }
+
+        CLIENT_ID = ""
+        CLIENT_SECRET = ""
+        if (storageConfig?.storageType == StorageType.GOOGLE_DRIVE) {
+            storageConfig?.googleDriveConfig?.let { gdConfig ->
+                CLIENT_ID = gdConfig.clientId
+                CLIENT_SECRET = gdConfig.clientSecret
+                if (CLIENT_ID.isNotEmpty()) {
+                    AppLog.i(TAG, "Google Drive OAuth 配置已加载 (client_id 末尾 ...${CLIENT_ID.takeLast(12)})")
+                }
+            }
+        }
+    }
 
     private fun requirePrefs(): SharedPreferences =
         prefs ?: throw IllegalStateException("AuthManager.init() not called")

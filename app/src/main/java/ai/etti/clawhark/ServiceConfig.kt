@@ -44,9 +44,9 @@ data class ServiceConfig(
         private const val STALE_TMP_THRESHOLD_MS_DEBUG = 5 * 60 * 1000L // 过时临时文件阈值: 5分钟 (更快的清理)
         
         fun load(context: Context): ServiceConfig {
-            val isDebugMode = context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
-                .getBoolean(PREF_DEBUG_MODE, false)
-            val opusBitRate = OpusBitRate.loadBitRate(context)
+            val appConfig = ClawHarkConfig.load(context)
+            val isDebugMode = appConfig.recording.debugMode
+            val opusBitRate = appConfig.recording.opusBitRate
 
             return if (isDebugMode) {
                 ServiceConfig(

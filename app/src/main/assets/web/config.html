@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClawHark 设置</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0d0d0d;
+      --surface: #1a1a1a;
+      --border: #333;
+      --text: #eee;
+      --muted: #999;
+      --accent: #aa6639;
+      --ok: #6a6;
+      --err: #c55;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 16px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.4rem; margin: 0 0 8px; }
+    h2 {
+      font-size: 1rem;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 6px;
+      margin: 24px 0 12px;
+    }
+    .sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 16px; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin: 10px 0 4px; }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 1rem;
+    }
+    .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+    .row input[type=checkbox] { width: auto; }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 20px;
+      font-size: 1rem;
+      cursor: pointer;
+      margin-top: 16px;
+    }
+    button.secondary { background: #444; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #pinGate { max-width: 360px; margin: 40px auto; text-align: center; }
+    #mainForm { max-width: 640px; margin: 0 auto; display: none; }
+    #status, #message { margin-top: 12px; font-size: 0.9rem; }
+    #message.ok { color: var(--ok); }
+    #message.err { color: var(--err); }
+    .hidden { display: none !important; }
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85rem; }
+    .status-grid span { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div id="pinGate">
+    <h1>ClawHark 设置</h1>
+    <p class="sub">请输入手表上显示的 6 位 PIN</p>
+    <input id="pinInput" type="text" inputmode="numeric" maxlength="6" placeholder="PIN" autocomplete="off">
+    <button id="pinBtn" type="button">进入</button>
+    <div id="pinError" class="err" style="color:var(--err);margin-top:8px;"></div>
+  </div>
+
+  <div id="mainForm">
+    <h1>ClawHark 设置</h1>
+    <p class="sub">与手表配置同步，保存后写入 clawhark.jsonc</p>
+
+    <div id="status" class="status-grid"></div>
+
+    <h2>云存储</h2>
+    <label for="storage_type">存储类型</label>
+    <select id="storage_type">
+      <option value="google_drive">Google Drive</option>
+      <option value="s3">S3 兼容</option>
+    </select>
+
+    <div id="gdSection">
+      <label for="client_id">Google Client ID</label>
+      <input id="client_id" type="text" autocomplete="off">
+      <label for="client_secret">Client Secret（通常留空）</label>
+      <input id="client_secret" type="password" autocomplete="off" placeholder="未修改则留空或 ***">
+    </div>
+
+    <div id="s3Section" class="hidden">
+      <label for="endpoint">Endpoint</label>
+      <input id="endpoint" type="url">
+      <label for="region">Region</label>
+      <input id="region" type="text">
+      <label for="bucket">Bucket</label>
+      <input id="bucket" type="text">
+      <label for="access_key">Access Key</label>
+      <input id="access_key" type="password" autocomplete="off" placeholder="未修改则留空或 ***">
+      <label for="secret_key">Secret Key</label>
+      <input id="secret_key" type="password" autocomplete="off" placeholder="未修改则留空或 ***">
+      <label for="path_prefix">Path Prefix</label>
+      <input id="path_prefix" type="text">
+    </div>
+
+    <h2>录音设置</h2>
+    <div class="row">
+      <input id="pause_on_charge" type="checkbox">
+      <label for="pause_on_charge" style="margin:0">充电时暂停并上传</label>
+    </div>
+    <label for="opus_bit_rate">Opus 码率</label>
+    <select id="opus_bit_rate">
+      <option value="16000">16 kbps</option>
+      <option value="24000">24 kbps</option>
+      <option value="32000">32 kbps（推荐）</option>
+      <option value="48000">48 kbps</option>
+    </select>
+    <div class="row">
+      <input id="debug_mode" type="checkbox">
+      <label for="debug_mode" style="margin:0">调试模式（需重启应用）</label>
+    </div>
+
+    <button id="saveBtn" type="button">保存配置</button>
+    <button id="uploadBtn" type="button" class="secondary">手动上传全部</button>
+    <div id="message"></div>
+  </div>
+
+  <script>
+    let pin = sessionStorage.getItem('clawhark_pin') || '';
+
+    const $ = (id) => document.getElementById(id);
+
+    function headers() {
+      return { 'Content-Type': 'application/json', 'X-ClawHark-Pin': pin };
+    }
+
+    function showStorageSections() {
+      const t = $('storage_type').value;
+      $('gdSection').classList.toggle('hidden', t !== 'google_drive');
+      $('s3Section').classList.toggle('hidden', t !== 's3');
+    }
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
+      if (res.status === 401) throw new Error('PIN 无效');
+      const text = await res.text();
+      try { return JSON.parse(text); } catch { return text; }
+    }
+
+    async function loadStatus() {
+      try {
+        const s = await api('/api/status');
+        $('status').innerHTML = `
+          <div><span>WiFi</span> ${s.wifi_connected ? '已连接' : '未连接'}</div>
+          <div><span>存储</span> ${s.storage_type}</div>
+          <div><span>已授权</span> ${s.authenticated ? '是' : '否'}</div>
+          <div><span>待上传</span> ${s.pending_files} 文件</div>
+        `;
+      } catch (e) { /* ignore */ }
+    }
+
+    async function loadConfig() {
+      const c = await api('/api/config');
+      $('storage_type').value = c.storage_type || 'google_drive';
+      $('client_id').value = c.google_drive?.client_id || '';
+      $('client_secret').value = c.google_drive?.client_secret || '';
+      $('endpoint').value = c.s3?.endpoint || '';
+      $('region').value = c.s3?.region || '';
+      $('bucket').value = c.s3?.bucket || '';
+      $('access_key').value = c.s3?.access_key || '';
+      $('secret_key').value = c.s3?.secret_key || '';
+      $('path_prefix').value = c.s3?.path_prefix || 'ClawHark/';
+      $('pause_on_charge').checked = !!c.recording?.pause_on_charge;
+      $('opus_bit_rate').value = String(c.recording?.opus_bit_rate || 32000);
+      $('debug_mode').checked = !!c.recording?.debug_mode;
+      showStorageSections();
+      loadStatus();
+    }
+
+    function buildPayload() {
+      return {
+        storage_type: $('storage_type').value,
+        google_drive: {
+          client_id: $('client_id').value.trim(),
+          client_secret: $('client_secret').value.trim()
+        },
+        s3: {
+          endpoint: $('endpoint').value.trim(),
+          region: $('region').value.trim(),
+          bucket: $('bucket').value.trim(),
+          access_key: $('access_key').value.trim(),
+          secret_key: $('secret_key').value.trim(),
+          path_prefix: $('path_prefix').value.trim() || 'ClawHark/'
+        },
+        recording: {
+          pause_on_charge: $('pause_on_charge').checked,
+          opus_bit_rate: parseInt($('opus_bit_rate').value, 10),
+          debug_mode: $('debug_mode').checked
+        }
+      };
+    }
+
+    async function enterApp() {
+      pin = $('pinInput').value.trim();
+      if (pin.length !== 6) {
+        $('pinError').textContent = '请输入 6 位 PIN';
+        return;
+      }
+      try {
+        await api('/api/config');
+        sessionStorage.setItem('clawhark_pin', pin);
+        $('pinGate').style.display = 'none';
+        $('mainForm').style.display = 'block';
+        await loadConfig();
+      } catch (e) {
+        $('pinError').textContent = e.message || '验证失败';
+      }
+    }
+
+    $('storage_type').addEventListener('change', showStorageSections);
+    $('pinBtn').addEventListener('click', enterApp);
+    $('pinInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') enterApp(); });
+
+    $('saveBtn').addEventListener('click', async () => {
+      $('message').className = '';
+      $('message').textContent = '保存中...';
+      try {
+        const result = await api('/api/config', {
+          method: 'POST',
+          body: JSON.stringify(buildPayload())
+        });
+        let msg = '保存成功';
+        if (result.storage_changed) msg += '（存储配置已变更，可能需要重新授权）';
+        msg += '。码率/调试模式变更需重启录音或应用后生效。';
+        $('message').className = 'ok';
+        $('message').textContent = msg;
+        await loadConfig();
+      } catch (e) {
+        $('message').className = 'err';
+        $('message').textContent = e.message || '保存失败';
+      }
+    });
+
+    $('uploadBtn').addEventListener('click', async () => {
+      $('message').textContent = '触发上传...';
+      try {
+        await api('/api/upload/trigger', { method: 'POST', body: '{}' });
+        $('message').className = 'ok';
+        $('message').textContent = '已触发上传';
+        loadStatus();
+      } catch (e) {
+        $('message').className = 'err';
+        $('message').textContent = e.message || '上传触发失败';
+      }
+    });
+
+    if (pin) {
+      api('/api/config').then(() => {
+        $('pinGate').style.display = 'none';
+        $('mainForm').style.display = 'block';
+        loadConfig();
+      }).catch(() => { sessionStorage.removeItem('clawhark_pin'); pin = ''; });
+    }
+  </script>
+</body>
+</html>

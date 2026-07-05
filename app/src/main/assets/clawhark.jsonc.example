@@ -1,0 +1,31 @@
+{
+  // 云存储后端: "google_drive" 或 "s3"
+  "storage_type": "google_drive",
+
+  "google_drive": {
+    // Google Cloud Console → OAuth 2.0 客户端 → 类型: TV 和受限输入设备
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    // 通常留空；TV/受限设备类型不需要 client_secret
+    "client_secret": ""
+  },
+
+  "s3": {
+    // S3 兼容端点 (七牛、MinIO、AWS 等)
+    "endpoint": "https://s3.cn-east-1.qiniucs.com",
+    "region": "cn-east-1",
+    "bucket": "your-bucket-name",
+    "access_key": "YOUR_ACCESS_KEY",
+    "secret_key": "YOUR_SECRET_KEY",
+    // 上传路径前缀，末尾建议保留 /
+    "path_prefix": "ClawHark/"
+  },
+
+  "recording": {
+    // 充电时自动暂停录音并触发上传
+    "pause_on_charge": true,
+    // Opus 码率 (bps): 16000 | 24000 | 32000 | 48000，修改后需重启录音
+    "opus_bit_rate": 32000,
+    // 调试模式: 更短分块、更频繁上传，修改后需重启应用
+    "debug_mode": false
+  }
+}

@@ -26,8 +26,7 @@ class ChargingMonitor(
         }
 
         fun isPauseOnChargeEnabled(context: Context): Boolean {
-            return context.getSharedPreferences(RecordingService.PREF_FILE, Context.MODE_PRIVATE)
-                .getBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, true)
+            return ClawHarkConfig.load(context).recording.pauseOnCharge
         }
     }
 

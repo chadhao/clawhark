@@ -87,34 +87,22 @@ ClawHark 在后台录制你的日常活动,过滤静音,上传到你的 Google D
 
 ### 1. 设置存储
 
-ClawHark 支持两种云存储方式:
+ClawHark 使用单一配置文件 **`clawhark.jsonc`**（JSONC 格式，支持 `//` 注释），统一管理云存储与应用设置。
 
-#### 选项 A: Google Drive (国际用户)
+#### 方式 A：构建时嵌入（开发者）
 
-在 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) 中创建 OAuth 2.0 客户端:
+复制 `clawhark.jsonc.example` → `app/src/main/assets/clawhark.jsonc` 并编辑（该文件已在 `.gitignore` 中，不会提交密钥）：
 
-- **类型:** TVs and Limited Input devices(电视和受限输入设备)
-- **范围:** `drive.file`
-
-复制 `oauth_config.json.example` → `app/src/main/assets/oauth_config.json` 并配置:
-
-```json
+```jsonc
 {
+  // 云存储: "google_drive" 或 "s3"
   "storage_type": "google_drive",
+
   "google_drive": {
     "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-    "client_secret": "YOUR_CLIENT_SECRET"
-  }
-}
-```
+    "client_secret": ""
+  },
 
-#### 选项 B: S3 兼容存储 (中国用户推荐)
-
-使用任何 S3 兼容的对象存储服务,如七牛云、阿里云 OSS、腾讯云 COS 等:
-
-```json
-{
-  "storage_type": "s3",
   "s3": {
     "endpoint": "https://s3.cn-east-1.qiniucs.com",
     "region": "cn-east-1",
@@ -122,9 +110,33 @@ ClawHark 支持两种云存储方式:
     "access_key": "YOUR_ACCESS_KEY",
     "secret_key": "YOUR_SECRET_KEY",
     "path_prefix": "ClawHark/"
+  },
+
+  "recording": {
+    "pause_on_charge": true,
+    "opus_bit_rate": 32000,
+    "debug_mode": false
   }
 }
 ```
+
+首次安装后，配置会复制到手表内部存储 `filesDir/clawhark.jsonc`，之后以运行时文件为准。
+
+#### 方式 B：局域网网页设置（推荐）
+
+1. 手表连接 WiFi，打开 ClawHark → **设置** → 开启 **局域网网页设置**
+2. 在同一 WiFi 下的手机/电脑浏览器打开显示的地址（如 `http://192.168.x.x:8765`）
+3. 输入手表显示的 6 位 PIN，在网页中填写 S3 / Google Drive 凭证并保存
+4. 配置完成后在手表上**手动关闭**网页设置服务
+
+#### Google Drive OAuth
+
+在 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) 中创建 OAuth 2.0 客户端:
+
+- **类型:** TVs and Limited Input devices（电视和受限输入设备）
+- **范围:** `drive.file`
+
+#### S3 兼容存储 (中国用户推荐)
 
 **S3 兼容服务配置示例:**
 
@@ -379,7 +391,8 @@ $env:ANDROID_SERIAL = "emulator-5554"  # Windows PowerShell
 clawhark/
 ├── app/src/main/
 │   ├── assets/
-│   │   └── oauth_config.json.example       # OAuth 配置模板
+│   │   └── clawhark.jsonc.example          # 统一配置模板（JSONC，支持注释）
+│   │   └── web/config.html                 # 局域网网页设置 UI
 │   ├── java/ai/etti/clawhark/
 │   │   ├── 📱 用户界面
 │   │   │   └── MainActivity.kt             # 单按钮界面 (702行)
@@ -403,7 +416,10 @@ clawhark/
 │   │   │   └── StorageConfig.kt            # 存储配置数据类
 │   │   │
 │   │   ├── 🔐 认证与配置
-│   │   │   └── AuthManager.kt              # OAuth2设备代码流程
+│   │   │   ├── AuthManager.kt              # OAuth2设备代码流程
+│   │   │   ├── ClawHarkConfig.kt           # 统一 JSONC 配置读写
+│   │   │   ├── ConfigHttpServer.kt         # 局域网配置 HTTP 服务
+│   │   │   └── ConfigServerService.kt      # 网页设置前台服务
 │   │   │
 │   │   ├── 🛠️ 系统集成
 │   │   │   ├── BootReceiver.kt             # 启动接收器
@@ -474,7 +490,8 @@ clawhark/
 
 | 文件 | 用途 |
 |------|------|
-| `oauth_config.json` | 云存储凭据配置 (支持Google Drive / S3) |
+| `clawhark.jsonc` | 统一配置（云存储 + 录音设置，JSONC 支持注释） |
+| `clawhark.jsonc.example` | 配置模板 |
 | `gradle.properties` | Gradle构建配置 |
 | `AndroidManifest.xml` | 应用权限和组件声明 |
 

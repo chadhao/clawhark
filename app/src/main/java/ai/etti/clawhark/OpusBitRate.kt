@@ -19,18 +19,15 @@ object OpusBitRate {
         Option(48000, "48 kbps", "高音质")
     )
 
-    fun loadBitRate(context: Context): Int {
-        val saved = context.getSharedPreferences(ServiceConfig.PREF_FILE, Context.MODE_PRIVATE)
-            .getInt(PREF_OPUS_BIT_RATE, DEFAULT_BIT_RATE)
-        return OPTIONS.find { it.bitRate == saved }?.bitRate ?: DEFAULT_BIT_RATE
-    }
+    fun loadBitRate(context: Context): Int =
+        ClawHarkConfig.load(context).recording.opusBitRate
 
     fun saveBitRate(context: Context, bitRate: Int) {
         val valid = OPTIONS.find { it.bitRate == bitRate }?.bitRate ?: DEFAULT_BIT_RATE
-        context.getSharedPreferences(ServiceConfig.PREF_FILE, Context.MODE_PRIVATE)
-            .edit()
-            .putInt(PREF_OPUS_BIT_RATE, valid)
-            .apply()
+        val current = ClawHarkConfig.load(context)
+        ClawHarkConfig.save(context, current.copy(
+            recording = current.recording.copy(opusBitRate = valid)
+        ))
     }
 
     fun labelFor(bitRate: Int): String =

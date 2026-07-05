@@ -76,4 +76,7 @@ dependencies {
     // AWS SDK for S3
     implementation("com.amazonaws:aws-android-sdk-s3:2.77.0")
     implementation("com.amazonaws:aws-android-sdk-core:2.77.0")
+
+    // 局域网配置 HTTP 服务
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
 }

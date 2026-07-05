@@ -9,10 +9,12 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -75,37 +77,6 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val DEBOUNCE_MS = 600L
-
-        /** 本地待上传文件统计（音频 + 侧车元数据合计） */
-        data class LocalRecordingCounts(
-            val audioCount: Int,
-            val metadataCount: Int
-        ) {
-            val totalUploadCount: Int get() = audioCount + metadataCount
-
-            fun formatLabel(): String = "${totalUploadCount}文件"
-
-            fun formatPendingUpload(): String = "${totalUploadCount}文件待上传"
-        }
-
-        fun countLocalRecordings(dir: File): LocalRecordingCounts {
-            if (!dir.exists()) return LocalRecordingCounts(0, 0)
-            val files = dir.listFiles()?.filter {
-                it.isFile && !it.name.endsWith(".uploading")
-            } ?: emptyList()
-            return LocalRecordingCounts(
-                audioCount = files.count { it.name.endsWith(".opus") },
-                metadataCount = files.count { it.name.endsWith(".opus.json") }
-            )
-        }
-
-        fun localRecordingsSizeBytes(dir: File): Long {
-            if (!dir.exists()) return 0L
-            return dir.listFiles()?.filter {
-                it.isFile && !it.name.endsWith(".uploading") &&
-                    (it.name.endsWith(".opus") || it.name.endsWith(".opus.json"))
-            }?.sumOf { it.length() } ?: 0L
-        }
     }
 
     data class UIState(
@@ -126,7 +97,10 @@ class MainActivity : ComponentActivity() {
         val isDebugMode: Boolean = false,
         val pauseOnCharge: Boolean = true,
         val opusBitRate: Int = OpusBitRate.DEFAULT_BIT_RATE,
-        val opusBitRateLabel: String = OpusBitRate.labelFor(OpusBitRate.DEFAULT_BIT_RATE)
+        val opusBitRateLabel: String = OpusBitRate.labelFor(OpusBitRate.DEFAULT_BIT_RATE),
+        val configServerRunning: Boolean = false,
+        val configServerUrl: String = "",
+        val configServerPin: String = ""
     )
 
     private val connection = object : ServiceConnection {
@@ -184,6 +158,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        updateConfigServerKeepScreenOn()
         requestBatteryExemption()
         if (AuthManager.isAuthenticated()) {
             val shouldRecord = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
@@ -378,6 +353,30 @@ class MainActivity : ComponentActivity() {
             }
 
             Button(
+                onClick = { toggleConfigServer() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = if (uiState.configServerRunning) Color(0xFFAA6639) else Color(0xFF444444)
+                )
+            ) {
+                Text(
+                    text = if (uiState.configServerRunning) "局域网网页设置 (开)" else "局域网网页设置 (关)",
+                    style = MaterialTheme.typography.caption1
+                )
+            }
+
+            if (uiState.configServerRunning) {
+                Text(
+                    text = "${uiState.configServerUrl}\nPIN: ${uiState.configServerPin}",
+                    color = Color(0xFF88CC88),
+                    style = MaterialTheme.typography.caption2,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            Button(
                 onClick = { toggleDebugMode() },
                 enabled = !uiState.sessionActive,
                 modifier = Modifier
@@ -520,20 +519,29 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateUIState() {
-        val storageConfig = AuthManager.getStorageConfig()
-        val storageType = storageConfig?.storageType ?: StorageType.GOOGLE_DRIVE
-        val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
-        val isDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
-        val pauseOnCharge = prefs.getBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, true)
-        val opusBitRate = OpusBitRate.loadBitRate(this)
+        val appConfig = ClawHarkConfig.load(this)
+        val storageType = appConfig.storageType
 
         uiState = uiState.copy(
             isAuthenticated = AuthManager.isAuthenticated() || storageType == StorageType.S3,
-            isDebugMode = isDebugMode,
-            pauseOnCharge = pauseOnCharge,
-            opusBitRate = opusBitRate,
-            opusBitRateLabel = OpusBitRate.labelFor(opusBitRate)
+            isDebugMode = appConfig.recording.debugMode,
+            pauseOnCharge = appConfig.recording.pauseOnCharge,
+            opusBitRate = appConfig.recording.opusBitRate,
+            opusBitRateLabel = OpusBitRate.labelFor(appConfig.recording.opusBitRate),
+            configServerRunning = ConfigServerState.isRunning,
+            configServerUrl = ConfigServerState.localUrl,
+            configServerPin = ConfigServerState.pin
         )
+        updateConfigServerKeepScreenOn()
+    }
+
+    /** 网页配置服务运行期间保持手表亮屏，避免息屏后局域网连接中断 */
+    private fun updateConfigServerKeepScreenOn() {
+        if (ConfigServerState.isRunning) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     private fun signOut() {
@@ -638,7 +646,7 @@ class MainActivity : ComponentActivity() {
                 val recordingsDir = File(filesDir, "recordings")
                 val counts = withContext(Dispatchers.IO) {
                     if (!recordingsDir.exists()) return@withContext null
-                    countLocalRecordings(recordingsDir)
+                    RecordingStats.countLocalRecordings(recordingsDir)
                 }
 
                 if (counts == null) {
@@ -731,9 +739,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun togglePauseOnCharge() {
-        val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
-        val newValue = !prefs.getBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, true)
-        prefs.edit().putBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, newValue).apply()
+        val current = ClawHarkConfig.load(this)
+        val newValue = !current.recording.pauseOnCharge
+        ClawHarkConfig.save(this, current.copy(
+            recording = current.recording.copy(pauseOnCharge = newValue)
+        ))
         uiState = uiState.copy(pauseOnCharge = newValue)
 
         val intent = Intent(this, RecordingService::class.java).apply {
@@ -747,21 +757,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun saveBitRate(bitRate: Int) {
-        OpusBitRate.saveBitRate(this, bitRate)
+        val valid = OpusBitRate.OPTIONS.find { it.bitRate == bitRate }?.bitRate ?: OpusBitRate.DEFAULT_BIT_RATE
+        val current = ClawHarkConfig.load(this)
+        ClawHarkConfig.save(this, current.copy(
+            recording = current.recording.copy(opusBitRate = valid)
+        ))
         uiState = uiState.copy(
-            opusBitRate = bitRate,
-            opusBitRateLabel = OpusBitRate.labelFor(bitRate)
+            opusBitRate = valid,
+            opusBitRateLabel = OpusBitRate.labelFor(valid)
         )
-        Toast.makeText(this, "码率已设为 ${OpusBitRate.labelFor(bitRate)}\n重启录音后生效", Toast.LENGTH_LONG).show()
-        AppLog.i("MainActivity", "码率已更新: $bitRate (需要重启录音)")
+        Toast.makeText(this, "码率已设为 ${OpusBitRate.labelFor(valid)}\n重启录音后生效", Toast.LENGTH_LONG).show()
+        AppLog.i("MainActivity", "码率已更新: $valid (需要重启录音)")
     }
 
     private fun toggleDebugMode() {
-        val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
-        val currentDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
-        val newDebugMode = !currentDebugMode
-
-        prefs.edit().putBoolean(ServiceConfig.PREF_DEBUG_MODE, newDebugMode).apply()
+        val current = ClawHarkConfig.load(this)
+        val newDebugMode = !current.recording.debugMode
+        ClawHarkConfig.save(this, current.copy(
+            recording = current.recording.copy(debugMode = newDebugMode)
+        ))
         
         uiState = uiState.copy(isDebugMode = newDebugMode)
         
@@ -807,18 +821,18 @@ class MainActivity : ComponentActivity() {
             null -> "未知"
         }
 
-        val prefs = getSharedPreferences(RecordingService.PREF_FILE, MODE_PRIVATE)
-        val isDebugMode = prefs.getBoolean(ServiceConfig.PREF_DEBUG_MODE, false)
-        val pauseOnCharge = prefs.getBoolean(RecordingService.PREF_PAUSE_ON_CHARGE, true)
-        val opusBitRate = OpusBitRate.loadBitRate(this)
+        val appConfig = ClawHarkConfig.load(this)
+        val isDebugMode = appConfig.recording.debugMode
+        val pauseOnCharge = appConfig.recording.pauseOnCharge
+        val opusBitRate = appConfig.recording.opusBitRate
 
         val recordingsDir = File(filesDir, "recordings")
-        val localCounts = countLocalRecordings(recordingsDir)
+        val localCounts = RecordingStats.countLocalRecordings(recordingsDir)
         val localFileLabel = localCounts.formatLabel()
 
         val svc = service
         if (svc != null && svc.isPausedForCharging()) {
-            val mb = String.format("%.1f", localRecordingsSizeBytes(recordingsDir) / 1024.0 / 1024.0)
+            val mb = String.format("%.1f", RecordingStats.localRecordingsSizeBytes(recordingsDir) / 1024.0 / 1024.0)
             uiState = uiState.copy(
                 isRecording = false,
                 sessionActive = true,
@@ -834,7 +848,10 @@ class MainActivity : ComponentActivity() {
                 isDebugMode = isDebugMode,
                 pauseOnCharge = pauseOnCharge,
                 opusBitRate = opusBitRate,
-                opusBitRateLabel = OpusBitRate.labelFor(opusBitRate)
+                opusBitRateLabel = OpusBitRate.labelFor(opusBitRate),
+                configServerRunning = ConfigServerState.isRunning,
+                configServerUrl = ConfigServerState.localUrl,
+                configServerPin = ConfigServerState.pin
             )
         } else if (svc != null && svc.isCurrentlyRecording()) {
             val elapsed = System.currentTimeMillis() - svc.recordingStartTime
@@ -854,10 +871,13 @@ class MainActivity : ComponentActivity() {
                 isDebugMode = isDebugMode,
                 pauseOnCharge = pauseOnCharge,
                 opusBitRate = opusBitRate,
-                opusBitRateLabel = OpusBitRate.labelFor(opusBitRate)
+                opusBitRateLabel = OpusBitRate.labelFor(opusBitRate),
+                configServerRunning = ConfigServerState.isRunning,
+                configServerUrl = ConfigServerState.localUrl,
+                configServerPin = ConfigServerState.pin
             )
         } else {
-            val mb = String.format("%.1f", localRecordingsSizeBytes(recordingsDir) / 1024.0 / 1024.0)
+            val mb = String.format("%.1f", RecordingStats.localRecordingsSizeBytes(recordingsDir) / 1024.0 / 1024.0)
             
             uiState = uiState.copy(
                 isRecording = false,
@@ -874,8 +894,36 @@ class MainActivity : ComponentActivity() {
                 isDebugMode = isDebugMode,
                 pauseOnCharge = pauseOnCharge,
                 opusBitRate = opusBitRate,
-                opusBitRateLabel = OpusBitRate.labelFor(opusBitRate)
+                opusBitRateLabel = OpusBitRate.labelFor(opusBitRate),
+                configServerRunning = ConfigServerState.isRunning,
+                configServerUrl = ConfigServerState.localUrl,
+                configServerPin = ConfigServerState.pin
             )
+        }
+    }
+
+    private fun toggleConfigServer() {
+        if (ConfigServerState.isRunning) {
+            val intent = Intent(this, ConfigServerService::class.java).apply {
+                action = ConfigServerService.ACTION_STOP
+            }
+            startService(intent)
+            Toast.makeText(this, "局域网网页设置已关闭", Toast.LENGTH_SHORT).show()
+        } else {
+            val intent = Intent(this, ConfigServerService::class.java).apply {
+                action = ConfigServerService.ACTION_START
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            Toast.makeText(this, "正在启动网页设置服务...", Toast.LENGTH_SHORT).show()
+        }
+        scope.launch {
+            delay(500)
+            updateUIState()
+            updateUI()
         }
     }
 

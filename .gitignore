@@ -9,5 +9,6 @@ logs/
 
 # Release keystore
 keystore/
+app/src/main/assets/clawhark.jsonc
 app/src/main/assets/oauth_config.json
 keystore.properties
