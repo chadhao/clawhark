@@ -76,6 +76,8 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             }
         }
 
+        val storageType = storageConfig!!.storageType
+
         val pairedSidecarCount = audioFiles.count { ChunkMetadata.sidecarFileFor(it).exists() }
         val totalUploadCount = audioFiles.size + pairedSidecarCount + orphanedSidecars.size
 
@@ -140,6 +142,15 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 }
             }
         } finally {
+            if (audioSucceeded + sidecarSucceeded > 0) {
+                UploadNotifier.notify(
+                    applicationContext,
+                    network,
+                    audioSucceeded,
+                    sidecarSucceeded,
+                    storageType
+                )
+            }
             networkManager.releaseNetwork()
             AppLog.d(TAG, "网络资源已释放")
         }

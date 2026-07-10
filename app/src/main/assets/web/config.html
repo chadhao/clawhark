@@ -129,6 +129,17 @@
       <label for="debug_mode" style="margin:0">调试模式（需重启应用）</label>
     </div>
 
+    <h2>上传通知</h2>
+    <p class="sub" id="uploadNotifyHint">上传成功后向 ntfy 发消息，触发 omi_mini 后端自动处理。仅 S3 存储有效。</p>
+    <div class="row">
+      <input id="upload_notify_enabled" type="checkbox">
+      <label for="upload_notify_enabled" style="margin:0">启用上传通知</label>
+    </div>
+    <label for="ntfy_url">ntfy Topic URL</label>
+    <input id="ntfy_url" type="url" placeholder="http://192.168.1.10:2586/omi-watch-xxx" autocomplete="off">
+    <label for="ntfy_auth_token">ntfy Token（可选）</label>
+    <input id="ntfy_auth_token" type="password" autocomplete="off" placeholder="未修改则留空或 ***">
+
     <button id="saveBtn" type="button">保存配置</button>
     <button id="uploadBtn" type="button" class="secondary">手动上传全部</button>
     <div id="message"></div>
@@ -147,6 +158,11 @@
       const t = $('storage_type').value;
       $('gdSection').classList.toggle('hidden', t !== 'google_drive');
       $('s3Section').classList.toggle('hidden', t !== 's3');
+      const s3Only = t === 's3';
+      $('upload_notify_enabled').disabled = !s3Only;
+      $('ntfy_url').disabled = !s3Only;
+      $('ntfy_auth_token').disabled = !s3Only;
+      $('uploadNotifyHint').style.opacity = s3Only ? '1' : '0.5';
     }
 
     async function api(path, opts = {}) {
@@ -182,6 +198,9 @@
       $('pause_on_charge').checked = !!c.recording?.pause_on_charge;
       $('opus_bit_rate').value = String(c.recording?.opus_bit_rate || 32000);
       $('debug_mode').checked = !!c.recording?.debug_mode;
+      $('upload_notify_enabled').checked = !!c.upload_notify?.enabled;
+      $('ntfy_url').value = c.upload_notify?.ntfy_url || '';
+      $('ntfy_auth_token').value = c.upload_notify?.auth_token || '';
       showStorageSections();
       loadStatus();
     }
@@ -205,6 +224,11 @@
           pause_on_charge: $('pause_on_charge').checked,
           opus_bit_rate: parseInt($('opus_bit_rate').value, 10),
           debug_mode: $('debug_mode').checked
+        },
+        upload_notify: {
+          enabled: $('upload_notify_enabled').checked,
+          ntfy_url: $('ntfy_url').value.trim(),
+          auth_token: $('ntfy_auth_token').value.trim()
         }
       };
     }

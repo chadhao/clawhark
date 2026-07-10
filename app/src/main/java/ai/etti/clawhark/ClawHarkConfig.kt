@@ -20,11 +20,18 @@ object ClawHarkConfig {
         val debugMode: Boolean = false
     )
 
+    data class UploadNotifySettings(
+        val enabled: Boolean = false,
+        val ntfyUrl: String = "",
+        val authToken: String = ""
+    )
+
     data class FullConfig(
         val storageType: StorageType,
         val googleDrive: GoogleDriveConfig?,
         val s3: S3Config?,
-        val recording: RecordingSettings
+        val recording: RecordingSettings,
+        val uploadNotify: UploadNotifySettings = UploadNotifySettings()
     ) {
         fun toStorageConfig(): StorageConfig = StorageConfig(
             storageType = storageType,
@@ -110,6 +117,12 @@ object ClawHarkConfig {
         rec.put("debug_mode", config.recording.debugMode)
         root.put("recording", rec)
 
+        val notify = JSONObject()
+        notify.put("enabled", config.uploadNotify.enabled)
+        notify.put("ntfy_url", config.uploadNotify.ntfyUrl)
+        notify.put("auth_token", maskSecret(config.uploadNotify.authToken, maskSecrets))
+        root.put("upload_notify", notify)
+
         return root
     }
 
@@ -149,6 +162,17 @@ object ClawHarkConfig {
         val validBitRate = OpusBitRate.OPTIONS.find { it.bitRate == bitRate }?.bitRate
             ?: OpusBitRate.DEFAULT_BIT_RATE
 
+        val uploadNotify = if (json.has("upload_notify")) {
+            val n = json.getJSONObject("upload_notify")
+            UploadNotifySettings(
+                enabled = n.optBoolean("enabled", false),
+                ntfyUrl = n.optString("ntfy_url", ""),
+                authToken = n.optString("auth_token", "")
+            )
+        } else {
+            UploadNotifySettings()
+        }
+
         return FullConfig(
             storageType = storageType,
             googleDrive = googleDrive,
@@ -157,7 +181,8 @@ object ClawHarkConfig {
                 pauseOnCharge = rec.optBoolean("pause_on_charge", true),
                 opusBitRate = validBitRate,
                 debugMode = rec.optBoolean("debug_mode", false)
-            )
+            ),
+            uploadNotify = uploadNotify
         )
     }
 
@@ -181,7 +206,15 @@ object ClawHarkConfig {
             pathPrefix = incomingS3.pathPrefix.ifEmpty { "ClawHark/" }
         )
 
-        return incoming.copy(googleDrive = mergedGd, s3 = mergedS3)
+        val incomingNotify = incoming.uploadNotify
+        val existingNotify = existing.uploadNotify
+        val mergedNotify = UploadNotifySettings(
+            enabled = incomingNotify.enabled,
+            ntfyUrl = incomingNotify.ntfyUrl,
+            authToken = preserveSecret(incomingNotify.authToken, existingNotify.authToken)
+        )
+
+        return incoming.copy(googleDrive = mergedGd, s3 = mergedS3, uploadNotify = mergedNotify)
     }
 
     private fun preserveSecret(incoming: String, existing: String): String {
@@ -303,6 +336,15 @@ object ClawHarkConfig {
             |    "opus_bit_rate": ${config.recording.opusBitRate},
             |    // 调试模式: 更短分块、更频繁上传，修改后需重启应用
             |    "debug_mode": ${config.recording.debugMode}
+            |  },
+            |
+            |  "upload_notify": {
+            |    // 上传成功后向 ntfy 发消息，触发 omi_mini 后端自动处理（仅 S3 存储有效）
+            |    "enabled": ${config.uploadNotify.enabled},
+            |    // 完整 ntfy topic URL，含随机 topic 名作为密钥
+            |    "ntfy_url": ${jsonString(config.uploadNotify.ntfyUrl)},
+            |    // ntfy 开启鉴权时填写
+            |    "auth_token": ${jsonString(config.uploadNotify.authToken)}
             |  }
             |}
         """.trimMargin() + "\n"
@@ -327,6 +369,11 @@ object ClawHarkConfig {
             "pause_on_charge": true,
             "opus_bit_rate": 32000,
             "debug_mode": false
+          },
+          "upload_notify": {
+            "enabled": false,
+            "ntfy_url": "",
+            "auth_token": ""
           }
         }
     """.trimIndent()

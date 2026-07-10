@@ -27,5 +27,14 @@
     "opus_bit_rate": 32000,
     // 调试模式: 更短分块、更频繁上传，修改后需重启应用
     "debug_mode": false
+  },
+
+  "upload_notify": {
+    // 上传成功后向 ntfy 发消息，触发 omi_mini 后端自动处理（仅 S3 存储有效）
+    "enabled": false,
+    // 完整 ntfy topic URL，含随机 topic 名作为密钥
+    "ntfy_url": "",
+    // ntfy 开启鉴权时填写
+    "auth_token": ""
   }
 }
