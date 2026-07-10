@@ -1,60 +1,61 @@
 # ClawHark — Always-On Audio Recording for Wear OS
 
-## What This Is
-A Wear OS app for Pixel Watch 3 that continuously records audio 24/7. Simple on/off toggle UI. An external trigger (HTTP endpoint or companion command) pulls recordings and clears memory.
+> **注意：** 本文档为早期产品规格草案，多项细节已过时。请以 [README.md](README.md) 与 [CLAUDE.md](CLAUDE.md) 为准。
 
-## Requirements
+## 当前实现摘要（2026-07）
+
+| 项目 | 早期规格 | 当前实现 |
+|------|----------|----------|
+| 音频格式 | OGG/Opus（草案） | Opus OGG，16 kHz  mono |
+| 块时长 | 5 分钟 | 15 分钟（生产）/ 2 分钟（调试） |
+| 云同步 | 无 | Google Drive 或 S3 兼容存储 |
+| 拉取方式 | 手表 HTTP :8080 | 云存储 + `scripts/pull.sh`；S3 可选 omi_mini 自动处理 |
+| 侧车元数据 | 无 | `.opus.json` 墙钟时间轴（v1.1.0+） |
+| 上传通知 | 无 | `upload_notify` → ntfy → omi_mini sync-pipeline（仅 S3） |
+
+---
+
+## What This Is (Original Spec)
+
+A Wear OS app for Pixel Watch 3 that continuously records audio 24/7. Simple on/off toggle UI. An external trigger pulls recordings from cloud storage.
+
+## Requirements (Original — partially implemented)
 
 ### Core
 - **Always-on recording** via a Wear OS foreground service with microphone access
-- **On/off toggle** — single screen with a big toggle button, shows recording status and duration
+- **On/off toggle** — single screen with a big toggle button
 - **Persistent notification** (required by Android for foreground mic service)
-- **Voice Activity Detection (VAD)** — only save chunks when someone is speaking (saves battery + storage)
-- **Chunked storage** — save audio in 5-minute chunks locally on watch storage
-- **Pull & clear** — expose a way to pull all recorded chunks (via HTTP server on watch, or ADB pull from known path) and clear them after transfer
+- **Voice Activity Detection (VAD)** — only save chunks when someone is speaking
+- **Chunked storage** — save audio in timed chunks locally on watch storage
+- **Cloud upload** — implemented via WorkManager (Drive or S3), not watch HTTP server
 
 ### Technical
 - **Target:** Wear OS 4+ (API 33+), Pixel Watch 3
 - **Language:** Kotlin
-- **Audio format:** OGG/Opus (good compression, low CPU)
-- **Storage location:** app-specific internal storage
-- **Battery optimization:** VAD to skip silence, low sample rate (16kHz mono), efficient codec
-- **Permissions:** RECORD_AUDIO, FOREGROUND_SERVICE, FOREGROUND_SERVICE_MICROPHONE, WAKE_LOCK, POST_NOTIFICATIONS
+- **Storage location:** app-specific internal storage, then cloud
 
-### Pull Mechanism
-Option A (preferred): Tiny HTTP server on the watch (port 8080) that serves:
-- `GET /recordings` — list all chunks with timestamps
-- `GET /recordings/{filename}` — download a chunk
-- `DELETE /recordings` — clear all chunks after transfer
-- `GET /status` — recording state, duration, storage used
+### Pull Mechanism (Original)
 
-Option B (fallback): Just save to a known ADB-accessible path so we can `adb pull` them.
+Option A (watch HTTP server) — **not implemented** as primary path.
 
-Implement BOTH — HTTP server for programmatic access, known path for ADB fallback.
+Option B (ADB) — still valid for debugging:
 
-### UI
-- Single screen
-- Big toggle (on/off)
-- Status: "Recording" / "Stopped"
-- Duration since last clear
-- Storage used
-- Number of chunks
+```bash
+adb shell "run-as ai.etti.clawhark ls files/recordings/"
+```
+
+Production path: cloud upload → `scripts/pull.sh` or omi_mini S3 sync.
 
 ## Build
-- Use Gradle with Kotlin DSL
-- Target Wear OS (no phone companion needed — standalone)
-- Output: APK installable via `adb install`
-- Must build from command line: `./gradlew assembleDebug`
 
-## Android SDK
-- ANDROID_HOME=~/Library/Android/sdk
-- Build tools: 34.0.0
-- Platform: android-34
-- ADB: ~/Library/Android/sdk/platform-tools/adb
-- Java 8 available (may need JDK 17 — install if needed)
+```bash
+./gradlew assembleDebug
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
 
-## Don't
-- No phone companion app
-- No cloud sync
-- No complex UI
-- No Google Play services dependency
+## Related Docs
+
+- [README.md](README.md) — 用户文档、配置、omi_mini 联调
+- [CLAUDE.md](CLAUDE.md) — AI/开发者参考
+- [openclaw/README.md](openclaw/README.md) — OpenClaw 集成
+- [../omi_mini/docs/ntfy配置.md](../omi_mini/docs/ntfy配置.md) — 手表 upload_complete 与 omi_mini 后端

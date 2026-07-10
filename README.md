@@ -30,6 +30,7 @@ ClawHark 在后台录制你的日常活动,过滤静音,上传到你的 Google D
 | 🔇 **语音活动检测** | 仅在有人说话时写入音频——节省电量和存储；长静音段不写入文件 |
 | 🕐 **侧车时间元数据** | 每个音频块附带 JSON，记录 chunk 内各语音段的真实墙钟时间与文件内偏移 |
 | ☁️ **多云存储支持** | 支持 Google Drive 或 S3 兼容存储(七牛云、阿里云等)，15 分钟 Opus 音频块通过 WiFi 上传，上传后自动删除 |
+| 🔔 **上传完成通知（可选）** | S3 模式下可 POST ntfy topic|
 | 🔄 **启动持久化** | 手表重启后自动恢复录音 |
 | 🎯 **单按钮界面** | 点击开始，双击停止。就这么简单。 |
 | 📱 **无需配套应用** | 完全独立运行在手表上 |
@@ -37,13 +38,13 @@ ClawHark 在后台录制你的日常活动,过滤静音,上传到你的 Google D
 
 ## 🔄 工作原理
 
-> **手表** → 通过 VAD 全天候录音 → **云存储(Google Drive/S3)** → 自动上传 15 分钟 Opus 块 + 侧车 JSON → **你的电脑** → 拉取、转录、输入 AI
+> **手表** → 通过 VAD 全天候录音 → **云存储(Google Drive/S3)** → 自动上传 15 分钟 Opus 块 + 侧车 JSON → **你的电脑 
 
 1. **录音** — 手表以 16 kHz 单声道持续采集；VAD 跳过长静音，但侧车 JSON 记录每段语音的真实开始时间
-2. **上传** — 音频块与对应 `.opus.json` 元数据上传到你的云存储中的 `ClawHark/` 文件夹
-3. **拉取** — 电脑上的脚本下载并按日期整理
-4. **转录** — Whisper + AssemblyAI 生成带墙钟时间戳的说话人分离转录文本
-5. **执行** — 你的 AI 助手读取转录文本并提取行动项目
+2. **上传** — 音频块与对应 `.opus.json` 元数据上传到你的云存储中的 `ClawHark/` 文件夹（S3 路径由 `path_prefix` 决定）
+3. **处理（二选一或并行）**
+   - **OpenClaw 路径** — 电脑上的 `scripts/pull.sh` 拉取并按日期整理 → `transcribe.py` 转录 → AI 提取行动项
+
 
 ### 音频格式与切片
 
@@ -116,9 +117,17 @@ ClawHark 使用单一配置文件 **`clawhark.jsonc`**（JSONC 格式，支持 `
     "pause_on_charge": true,
     "opus_bit_rate": 32000,
     "debug_mode": false
+  },
+
+  "upload_notify": {
+    "enabled": false,
+    "ntfy_url": "",
+    "auth_token": ""
   }
 }
 ```
+
+`upload_notify` 仅在 **`storage_type` 为 `s3`** 时生效；Google Drive 模式不会发送通知。启用后，每次 WorkManager 上传成功至少一个文件时，手表向 `ntfy_url` POST JSON
 
 首次安装后，配置会复制到手表内部存储 `filesDir/clawhark.jsonc`，之后以运行时文件为准。
 
@@ -126,7 +135,7 @@ ClawHark 使用单一配置文件 **`clawhark.jsonc`**（JSONC 格式，支持 `
 
 1. 手表连接 WiFi，打开 ClawHark → **设置** → 开启 **局域网网页设置**
 2. 在同一 WiFi 下的手机/电脑浏览器打开显示的地址（如 `http://192.168.x.x:8765`）
-3. 输入手表显示的 6 位 PIN，在网页中填写 S3 / Google Drive 凭证并保存
+3. 输入手表显示的 6 位 PIN，在网页中填写 S3 / Google Drive 凭证；S3 模式下还可配置 **上传完成通知**（ntfy URL）
 4. 配置完成后在手表上**手动关闭**网页设置服务
 
 #### Google Drive OAuth
@@ -239,6 +248,73 @@ python3 scripts/transcribe.py 2026-06-30 --provider gemini
 
 **Speaker B** (2026-06-30 10:12:40): 好的，我来跟进 Sarah 那边。
 ```
+
+## S3 + ntfy (可选)
+
+
+### 整体流程
+
+```
+手表 UploadWorker 上传 S3 成功
+    → POST ntfy topic（upload_complete）
+```
+
+### 1. 手表端配置
+
+在 `clawhark.jsonc` 或局域网网页设置中：
+
+```jsonc
+{
+  "storage_type": "s3",
+  "s3": {
+    "path_prefix": "ClawHark/"
+    // ... endpoint、bucket、密钥等
+  },
+  "upload_notify": {
+    "enabled": true,
+    "ntfy_url": "http://192.168.1.10:2586/omi-watch-a1b2c3",
+    "auth_token": ""
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `enabled` | 是否在上传成功后发送通知 |
+| `ntfy_url` | 完整 ntfy topic POST 地址（topic 名即共享密钥） |
+| `auth_token` | ntfy 开启鉴权时填写 Bearer token |
+
+**消息体**（由 `UploadNotifier.kt` 发送）：
+
+```json
+{
+  "v": 1,
+  "type": "upload_complete",
+  "audio_count": 2,
+  "sidecar_count": 2,
+  "storage": "s3"
+}
+```
+
+实现位置：`app/src/main/java/ai/etti/clawhark/UploadNotifier.kt`，在上传 worker 至少成功上传一个音频或侧车文件后调用。
+
+
+### 3. 验证
+
+```bash
+# 手表日志（上传通知）
+adb logcat -s UploadNotify
+
+
+```
+
+Web 管理端「任务流水线」中应出现 `audio_sync_pipeline` 类型 Job。
+
+### 注意事项
+
+- **仅 S3 模式**：Google Drive 上传不会触发 `upload_notify`
+- **WiFi 约束**：上传仍受 WorkManager WiFi 限制；通知在上传成功瞬间发送
+
 
 ## 🤖 与 OpenClaw 配合使用
 
@@ -380,6 +456,8 @@ $env:ANDROID_SERIAL = "emulator-5554"  # Windows PowerShell
 | 服务被杀死 | 内存压力 | 为 ClawHark 禁用电池优化 |
 | 重启后无录音 | 启动接收器 | 手动启动一次应用 |
 | 转录时间不准确 | 旧录音无侧车 JSON | 仅 v1.1.0+ 新录音含 `.opus.json`；旧块回退为文件名时间戳 |
+| 上传通知未触发 | 非 S3 或未启用 | 确认 `storage_type=s3` 且 `upload_notify.enabled=true`，`ntfy_url` 非空 |
+
 
 </details>
 
@@ -410,6 +488,7 @@ clawhark/
 │   │   │
 │   │   ├── ☁️ 云存储上传
 │   │   │   ├── UploadWorker.kt             # WorkManager后台上传
+│   │   │   ├── UploadNotifier.kt           # S3 上传完成后 ntfy 通知
 │   │   │   ├── DriveUploader.kt            # Google Drive上传
 │   │   │   ├── S3Uploader.kt               # S3兼容存储上传
 │   │   │   ├── StorageUploader.kt          # 存储上传接口
@@ -466,6 +545,7 @@ clawhark/
 | 文件 | 职责 | 支持的存储 |
 |------|------|-----------|
 | `UploadWorker.kt` | 后台上传协调 | WiFi 约束,重试机制;上传 `.opus` 及对应 `.opus.json` |
+| `UploadNotifier.kt` | 上传完成通知 | S3 模式下 POST ntfy `upload_complete` |
 | `DriveUploader.kt` | Google Drive 实现 | 使用 Drive API v3 |
 | `S3Uploader.kt` | S3 兼容实现 | 支持七牛/阿里云/腾讯云等 S3 兼容服务 |
 | `StorageUploader.kt` | 存储接口 | 统一上传接口,可扩展新存储后端 |
@@ -490,7 +570,7 @@ clawhark/
 
 | 文件 | 用途 |
 |------|------|
-| `clawhark.jsonc` | 统一配置（云存储 + 录音设置，JSONC 支持注释） |
+| `clawhark.jsonc` | 统一配置（云存储 + 录音 + upload_notify，JSONC 支持注释） |
 | `clawhark.jsonc.example` | 配置模板 |
 | `gradle.properties` | Gradle构建配置 |
 | `AndroidManifest.xml` | 应用权限和组件声明 |
