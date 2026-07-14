@@ -291,7 +291,7 @@ class RecordingService : Service() {
         statusLogger.logAudioState()
         
         storageManager.cleanupOrphanedTmpFiles()
-        uploadScheduler.schedulePeriodicUploads()
+        uploadScheduler.schedulePeriodicUploads(force = true)
         
         val success = audioRecorder.start(scope)
         if (!success) {

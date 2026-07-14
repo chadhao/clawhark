@@ -124,6 +124,9 @@
       <option value="32000">32 kbps（推荐）</option>
       <option value="48000">48 kbps</option>
     </select>
+    <label for="upload_interval_minutes">上传间隔（分钟）</label>
+    <input id="upload_interval_minutes" type="number" min="15" max="1440" step="1" value="60">
+    <p class="sub">最短 15 分钟（系统限制），最长 1440（24 小时）。仅 WiFi 上传，保存后立即生效。</p>
     <div class="row">
       <input id="debug_mode" type="checkbox">
       <label for="debug_mode" style="margin:0">调试模式（需重启应用）</label>
@@ -197,6 +200,7 @@
       $('path_prefix').value = c.s3?.path_prefix || 'ClawHark/';
       $('pause_on_charge').checked = !!c.recording?.pause_on_charge;
       $('opus_bit_rate').value = String(c.recording?.opus_bit_rate || 32000);
+      $('upload_interval_minutes').value = String(c.recording?.upload_interval_minutes || 60);
       $('debug_mode').checked = !!c.recording?.debug_mode;
       $('upload_notify_enabled').checked = !!c.upload_notify?.enabled;
       $('ntfy_url').value = c.upload_notify?.ntfy_url || '';
@@ -223,7 +227,8 @@
         recording: {
           pause_on_charge: $('pause_on_charge').checked,
           opus_bit_rate: parseInt($('opus_bit_rate').value, 10),
-          debug_mode: $('debug_mode').checked
+          debug_mode: $('debug_mode').checked,
+          upload_interval_minutes: parseInt($('upload_interval_minutes').value, 10) || 60
         },
         upload_notify: {
           enabled: $('upload_notify_enabled').checked,
@@ -264,6 +269,7 @@
         });
         let msg = '保存成功';
         if (result.storage_changed) msg += '（存储配置已变更，可能需要重新授权）';
+        if (result.upload_interval_minutes) msg += '。上传间隔已设为 ' + result.upload_interval_minutes + ' 分钟并立即重调度';
         msg += '。码率/调试模式变更需重启录音或应用后生效。';
         $('message').className = 'ok';
         $('message').textContent = msg;

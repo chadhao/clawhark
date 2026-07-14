@@ -18,10 +18,20 @@ class UploadScheduler(
         private const val TAG = "UploadScheduler"
         const val UPLOAD_FALLBACK_WORK_NAME = "upload_fallback"
         const val IMMEDIATE_WORK_NAME = "upload_immediate"
+
+        /** 用最新配置强制重调度周期上传（配置保存后调用） */
+        fun rescheduleFromConfig(context: Context) {
+            UploadScheduler(context, ServiceConfig.load(context)).schedulePeriodicUploads(force = true)
+        }
     }
     
-    fun schedulePeriodicUploads() {
+    fun schedulePeriodicUploads(force: Boolean = false) {
         val wm = WorkManager.getInstance(context)
+        val policy = if (force) {
+            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+        } else {
+            ExistingPeriodicWorkPolicy.UPDATE
+        }
 
         val uploadConstraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.UNMETERED)
@@ -33,7 +43,7 @@ class UploadScheduler(
         
         wm.enqueueUniquePeriodicWork(
             UploadWorker.WORK_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            policy,
             uploadWork
         )
 
@@ -53,7 +63,7 @@ class UploadScheduler(
         
         wm.enqueueUniquePeriodicWork(
             UPLOAD_FALLBACK_WORK_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            policy,
             fallbackWork
         )
 
@@ -62,7 +72,15 @@ class UploadScheduler(
         } else {
             "${config.uploadFallbackIntervalMinutes}分钟"
         }
-        AppLog.i(TAG, "上传已调度: 每 ${config.uploadIntervalMinutes}分钟 (仅WiFi) + 每 ${fallbackInterval} (备用WiFi)")
+        AppLog.i(
+            TAG,
+            "上传已调度: 每 ${config.uploadIntervalMinutes}分钟 (仅WiFi) + 每 ${fallbackInterval} (备用WiFi)" +
+                if (force) " [强制刷新]" else ""
+        )
+    }
+
+    fun reschedulePeriodicUploads() {
+        schedulePeriodicUploads(force = true)
     }
     
     fun cancelPeriodicUploads() {

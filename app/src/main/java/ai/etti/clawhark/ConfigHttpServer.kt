@@ -88,12 +88,14 @@ class ConfigHttpServer(
 
             ClawHarkConfig.save(appContext, merged)
             AuthManager.reloadStorageConfig(appContext, clearAuthOnChange = true)
+            UploadScheduler.rescheduleFromConfig(appContext)
 
             jsonResponse(
                 Response.Status.OK,
                 JSONObject()
                     .put("ok", true)
                     .put("storage_changed", ClawHarkConfig.storageFingerprint(merged) != ClawHarkConfig.storageFingerprint(existing))
+                    .put("upload_interval_minutes", merged.recording.uploadIntervalMinutes)
             )
         } catch (e: Exception) {
             AppLog.e(TAG, "保存配置失败", e)
@@ -122,6 +124,7 @@ class ConfigHttpServer(
             .put("pause_on_charge", config.recording.pauseOnCharge)
             .put("debug_mode", config.recording.debugMode)
             .put("opus_bit_rate", config.recording.opusBitRate)
+            .put("upload_interval_minutes", config.recording.uploadIntervalMinutes)
             .put("pending_files", counts.totalUploadCount)
             .put("wifi_connected", hasWifi)
 

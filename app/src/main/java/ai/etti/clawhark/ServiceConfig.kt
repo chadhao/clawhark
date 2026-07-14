@@ -24,7 +24,6 @@ data class ServiceConfig(
         private const val CHUNK_DURATION_MS_PROD = 15 * 60 * 1000L // 音频块时长: 15分钟
         private const val VAD_THRESHOLD_PROD = 600 // 语音活动检测阈值: 600 (低于此值视为静音)
         private const val VAD_SILENCE_TIMEOUT_MS_PROD = 3000L // 静音超时: 3秒 (超过3秒静音则停止录音)
-        private const val UPLOAD_INTERVAL_MINUTES_PROD = 60L // 上传间隔: 60分钟
         private const val UPLOAD_FALLBACK_INTERVAL_HOURS_PROD = 4L // 备用上传间隔: 4小时
         private const val STATUS_LOG_INTERVAL_MS_PROD = 3600_000L // 状态日志输出间隔: 1小时
         private const val MIN_FREE_SPACE_BYTES_PROD = 50 * 1024 * 1024L // 最小可用空间: 50MB
@@ -35,7 +34,6 @@ data class ServiceConfig(
         private const val CHUNK_DURATION_MS_DEBUG = 2 * 60 * 1000L // 音频块时长: 2分钟 (快速生成文件)
         private const val VAD_THRESHOLD_DEBUG = 0 // 语音活动检测阈值: 0 (禁用静音检测)
         private const val VAD_SILENCE_TIMEOUT_MS_DEBUG = 3000L // 静音超时: 3秒
-        private const val UPLOAD_INTERVAL_MINUTES_DEBUG = 15L // 上传间隔: 15分钟 (快速测试上传)
         private const val UPLOAD_FALLBACK_INTERVAL_HOURS_DEBUG = 0L // 备用上传间隔: 0小时 (使用分钟配置)
         private const val UPLOAD_FALLBACK_INTERVAL_MINUTES_DEBUG = 30L // 备用上传间隔: 30分钟
         private const val STATUS_LOG_INTERVAL_MS_DEBUG = 10 * 60_000L // 状态日志输出间隔: 10分钟 (更频繁的日志)
@@ -47,13 +45,14 @@ data class ServiceConfig(
             val appConfig = ClawHarkConfig.load(context)
             val isDebugMode = appConfig.recording.debugMode
             val opusBitRate = appConfig.recording.opusBitRate
+            val uploadIntervalMinutes = appConfig.recording.uploadIntervalMinutes
 
             return if (isDebugMode) {
                 ServiceConfig(
                     chunkDurationMs = CHUNK_DURATION_MS_DEBUG,
                     vadThreshold = VAD_THRESHOLD_DEBUG,
                     vadSilenceTimeoutMs = VAD_SILENCE_TIMEOUT_MS_DEBUG,
-                    uploadIntervalMinutes = UPLOAD_INTERVAL_MINUTES_DEBUG,
+                    uploadIntervalMinutes = uploadIntervalMinutes,
                     uploadFallbackIntervalHours = UPLOAD_FALLBACK_INTERVAL_HOURS_DEBUG,
                     uploadFallbackIntervalMinutes = UPLOAD_FALLBACK_INTERVAL_MINUTES_DEBUG,
                     statusLogIntervalMs = STATUS_LOG_INTERVAL_MS_DEBUG,
@@ -68,7 +67,7 @@ data class ServiceConfig(
                     chunkDurationMs = CHUNK_DURATION_MS_PROD,
                     vadThreshold = VAD_THRESHOLD_PROD,
                     vadSilenceTimeoutMs = VAD_SILENCE_TIMEOUT_MS_PROD,
-                    uploadIntervalMinutes = UPLOAD_INTERVAL_MINUTES_PROD,
+                    uploadIntervalMinutes = uploadIntervalMinutes,
                     uploadFallbackIntervalHours = UPLOAD_FALLBACK_INTERVAL_HOURS_PROD,
                     uploadFallbackIntervalMinutes = 0L,
                     statusLogIntervalMs = STATUS_LOG_INTERVAL_MS_PROD,

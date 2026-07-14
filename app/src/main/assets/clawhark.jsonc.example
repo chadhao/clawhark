@@ -25,8 +25,10 @@
     "pause_on_charge": true,
     // Opus 码率 (bps): 16000 | 24000 | 32000 | 48000，修改后需重启录音
     "opus_bit_rate": 32000,
-    // 调试模式: 更短分块、更频繁上传，修改后需重启应用
-    "debug_mode": false
+    // 调试模式: 更短分块等，修改后需重启应用（不再覆盖上传间隔）
+    "debug_mode": false,
+    // WiFi 周期上传间隔（分钟），范围 15–1440，保存后立即生效
+    "upload_interval_minutes": 60
   },
 
   "upload_notify": {

@@ -14,10 +14,19 @@ object ClawHarkConfig {
     private const val ASSET_DEFAULT = "clawhark.jsonc"
     private const val LEGACY_OAUTH = "oauth_config.json"
 
+    const val MIN_UPLOAD_INTERVAL_MINUTES = 15L
+    const val MAX_UPLOAD_INTERVAL_MINUTES = 1440L
+    const val DEFAULT_UPLOAD_INTERVAL_MINUTES = 60L
+
+    fun clampUploadIntervalMinutes(value: Long): Long =
+        value.coerceIn(MIN_UPLOAD_INTERVAL_MINUTES, MAX_UPLOAD_INTERVAL_MINUTES)
+
     data class RecordingSettings(
         val pauseOnCharge: Boolean = true,
         val opusBitRate: Int = OpusBitRate.DEFAULT_BIT_RATE,
-        val debugMode: Boolean = false
+        val debugMode: Boolean = false,
+        /** 主上传间隔（分钟），WorkManager 最短约 15 */
+        val uploadIntervalMinutes: Long = DEFAULT_UPLOAD_INTERVAL_MINUTES
     )
 
     data class UploadNotifySettings(
@@ -115,6 +124,7 @@ object ClawHarkConfig {
         rec.put("pause_on_charge", config.recording.pauseOnCharge)
         rec.put("opus_bit_rate", config.recording.opusBitRate)
         rec.put("debug_mode", config.recording.debugMode)
+        rec.put("upload_interval_minutes", config.recording.uploadIntervalMinutes)
         root.put("recording", rec)
 
         val notify = JSONObject()
@@ -180,7 +190,10 @@ object ClawHarkConfig {
             recording = RecordingSettings(
                 pauseOnCharge = rec.optBoolean("pause_on_charge", true),
                 opusBitRate = validBitRate,
-                debugMode = rec.optBoolean("debug_mode", false)
+                debugMode = rec.optBoolean("debug_mode", false),
+                uploadIntervalMinutes = clampUploadIntervalMinutes(
+                    rec.optLong("upload_interval_minutes", DEFAULT_UPLOAD_INTERVAL_MINUTES)
+                )
             ),
             uploadNotify = uploadNotify
         )
@@ -334,8 +347,10 @@ object ClawHarkConfig {
             |    "pause_on_charge": ${config.recording.pauseOnCharge},
             |    // Opus 码率 (bps): 16000 | 24000 | 32000 | 48000，修改后需重启录音
             |    "opus_bit_rate": ${config.recording.opusBitRate},
-            |    // 调试模式: 更短分块、更频繁上传，修改后需重启应用
-            |    "debug_mode": ${config.recording.debugMode}
+            |    // 调试模式: 更短分块等，修改后需重启应用（不再覆盖上传间隔）
+            |    "debug_mode": ${config.recording.debugMode},
+            |    // WiFi 周期上传间隔（分钟），范围 15–1440，保存后立即生效
+            |    "upload_interval_minutes": ${config.recording.uploadIntervalMinutes}
             |  },
             |
             |  "upload_notify": {
@@ -368,7 +383,8 @@ object ClawHarkConfig {
           "recording": {
             "pause_on_charge": true,
             "opus_bit_rate": 32000,
-            "debug_mode": false
+            "debug_mode": false,
+            "upload_interval_minutes": 60
           },
           "upload_notify": {
             "enabled": false,
