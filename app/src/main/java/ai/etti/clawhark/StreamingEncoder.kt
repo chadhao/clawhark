@@ -67,7 +67,11 @@ class StreamingEncoder(
         totalFed += pos
     }
 
-    fun complete(): File? {
+    /**
+     * 完成编码并关闭编解码器，结果留在 .opus.tmp。
+     * 调用方应先写侧车 JSON，再调用 [promoteToFinal] 暴露正式 .opus，避免上传抢跑。
+     */
+    fun completeEncoding(): File? {
         AppLog.d(TAG, "完成编码: ${totalFed / 1024}KB PCM -> ${finalFile.name}")
         val encodeStart = System.currentTimeMillis()
 
@@ -99,17 +103,7 @@ class StreamingEncoder(
             AppLog.i(TAG, "编码完成: ${totalFed/1024}KB -> ${tmpFile.length()/1024}KB (${ratio}压缩) 耗时${elapsed}ms")
 
             if (tmpFile.length() > 0) {
-                if (!tmpFile.renameTo(finalFile)) {
-                    AppLog.e(TAG, "重命名失败 ${tmpFile.name} -> ${finalFile.name}, 尝试复制")
-                    try {
-                        tmpFile.copyTo(finalFile, overwrite = true)
-                        tmpFile.delete()
-                    } catch (copyErr: Exception) {
-                        AppLog.e(TAG, "复制备选方案也失败", copyErr)
-                        return null
-                    }
-                }
-                return finalFile
+                return tmpFile
             }
             tmpFile.delete()
             return null
@@ -120,6 +114,26 @@ class StreamingEncoder(
             tmpFile.delete()
             return null
         }
+    }
+
+    /** 将 .opus.tmp 提升为正式 .opus（侧车已写好后调用） */
+    fun promoteToFinal(): File? {
+        if (!tmpFile.exists() || tmpFile.length() <= 0) {
+            AppLog.e(TAG, "无法提升: 临时文件无效 ${tmpFile.name}")
+            tmpFile.delete()
+            return null
+        }
+        if (!tmpFile.renameTo(finalFile)) {
+            AppLog.e(TAG, "重命名失败 ${tmpFile.name} -> ${finalFile.name}, 尝试复制")
+            try {
+                tmpFile.copyTo(finalFile, overwrite = true)
+                tmpFile.delete()
+            } catch (copyErr: Exception) {
+                AppLog.e(TAG, "复制备选方案也失败", copyErr)
+                return null
+            }
+        }
+        return finalFile
     }
 
     fun release() {

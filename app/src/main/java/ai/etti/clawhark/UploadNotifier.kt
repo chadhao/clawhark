@@ -5,7 +5,10 @@ import android.net.Network
 import org.json.JSONObject
 import java.io.OutputStreamWriter
 
-/** 上传完成后向 ntfy topic 发送通知，触发 omi_mini 后端自动处理。 */
+/**
+ * 成对上传成功后向 ntfy topic 发送通知，触发 omi_mini 后端自动处理。
+ * 调用方应仅在至少有一个成对单元（或合法无侧车块）成功后再调用，避免半成功误触同步。
+ */
 object UploadNotifier {
     private const val TAG = "UploadNotify"
 

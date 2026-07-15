@@ -310,7 +310,7 @@ class RecordingService : Service() {
     }
 
     /**
-     * 双阶段停录：立刻上传已落盘文件，等 finalize 后再 APPEND 补传尾块，最后取消周期任务。
+     * 停录：等待尾块 finalize（成对落盘）后再触发立即上传，并取消周期任务。
      * @param shutdownAfter 手动停止时为 true，收尾完成后 stopForeground + stopSelf
      */
     private fun stopRecording(shutdownAfter: Boolean = false) {
@@ -323,23 +323,20 @@ class RecordingService : Service() {
             return
         }
         AppLog.i(TAG, "=== 停止录音 ===")
-        // 立即清标志，供 UI / 充电暂停状态使用；finalize 由 stopAndAwait 等待
+        // 立即清标志，供 UI / 充电暂停状态使用；finalize 完成后才触发上传，保证成对就绪
         audioRecorder.stop()
         notificationManager.stopWordRotation()
         updateComplication()
 
-        // 阶段1：立刻传已落盘的 .opus（与 finalize 并行）
-        uploadScheduler.triggerImmediateUpload()
-
         scope.launch {
             try {
                 audioRecorder.stopAndAwait()
-                // 阶段2：尾块已落盘，排队补传（APPEND 不打断阶段1）
-                uploadScheduler.triggerImmediateUpload(append = true)
+                // 尾块 .opus + 侧车已落盘后再立即上传
+                uploadScheduler.triggerImmediateUpload()
                 uploadScheduler.cancelPeriodicUploads()
             } catch (e: Exception) {
                 AppLog.e(TAG, "停录收尾失败", e)
-                uploadScheduler.triggerImmediateUpload(append = true)
+                uploadScheduler.triggerImmediateUpload()
                 uploadScheduler.cancelPeriodicUploads()
             } finally {
                 if (shutdownAfter) {

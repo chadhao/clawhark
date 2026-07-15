@@ -182,12 +182,18 @@ class AudioRecorder(
             encoder = null
             val builder = metadataBuilder
             metadataBuilder = null
-            val encoded = enc.complete()
+            // 先停在 .opus.tmp，写侧车后再 rename，避免上传只看到音频
+            val tmp = enc.completeEncoding()
+            if (tmp == null) {
+                AppLog.e(TAG, "块编码失败 - 数据丢失")
+                return null
+            }
+            builder?.write()
+            val encoded = enc.promoteToFinal()
             if (encoded != null) {
-                builder?.write()
                 AppLog.i(TAG, "块已完成: ${encoded.name} (${encoded.length()/1024}KB)")
             } else {
-                AppLog.e(TAG, "块编码失败 - 数据丢失")
+                AppLog.e(TAG, "块提升失败 - 侧车可能已写入但音频仍为.tmp")
             }
             return encoded
         }

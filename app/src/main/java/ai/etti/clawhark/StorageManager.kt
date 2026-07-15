@@ -41,15 +41,65 @@ class StorageManager(
         var totalSize = recordings.sumOf { it.length() }
         if (totalSize <= config.maxLocalStorageBytes) return
 
-        val sorted = recordings.sortedBy { it.lastModified() }
+        // 按 basename 成组删除，避免只删 .opus 或只删 .opus.json
+        val groups = groupRecordingPairs(recordings)
+        val sorted = groups.sortedBy { it.oldestModified }
         val target = (config.maxLocalStorageBytes * 0.8).toLong()
-        for (file in sorted) {
+        for (group in sorted) {
             if (totalSize <= target) break
-            val size = file.length()
-            AppLog.w(TAG, "存储限制: 删除最旧录音 ${file.name} (${size/1024}KB)")
-            file.delete()
+            val size = group.totalSize
+            AppLog.w(
+                TAG,
+                "存储限制: 删除最旧录音组 ${group.label} (${size / 1024}KB, ${group.files.size} 个文件)"
+            )
+            for (file in group.files) {
+                file.delete()
+            }
             totalSize -= size
         }
+    }
+
+    private data class RecordingGroup(
+        val label: String,
+        val files: List<File>,
+        val totalSize: Long,
+        val oldestModified: Long
+    )
+
+    /** .opus 与对应 .opus.json 归为一组；孤立侧车或其它扩展名各自成组 */
+    private fun groupRecordingPairs(recordings: List<File>): List<RecordingGroup> {
+        val byName = recordings.associateBy { it.name }
+        val consumed = mutableSetOf<String>()
+        val groups = mutableListOf<RecordingGroup>()
+
+        for (audio in recordings.filter { it.extension == "opus" }.sortedBy { it.name }) {
+            if (audio.name in consumed) continue
+            val sidecar = byName[audio.name + ".json"]
+            val files = listOfNotNull(audio, sidecar)
+            files.forEach { consumed.add(it.name) }
+            groups.add(
+                RecordingGroup(
+                    label = audio.name,
+                    files = files,
+                    totalSize = files.sumOf { it.length() },
+                    oldestModified = files.minOf { it.lastModified() }
+                )
+            )
+        }
+
+        for (file in recordings.sortedBy { it.name }) {
+            if (file.name in consumed) continue
+            consumed.add(file.name)
+            groups.add(
+                RecordingGroup(
+                    label = file.name,
+                    files = listOf(file),
+                    totalSize = file.length(),
+                    oldestModified = file.lastModified()
+                )
+            )
+        }
+        return groups
     }
     
     fun cleanupOrphanedTmpFiles() {

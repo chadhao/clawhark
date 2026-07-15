@@ -127,7 +127,7 @@ ClawHark 使用单一配置文件 **`clawhark.jsonc`**（JSONC 格式，支持 `
 }
 ```
 
-`upload_notify` 仅在 **`storage_type` 为 `s3`** 时生效；Google Drive 模式不会发送通知。启用后，每次 WorkManager 上传成功至少一个文件时，手表向 `ntfy_url` POST JSON
+`upload_notify` 仅在 **`storage_type` 为 `s3`** 时生效；Google Drive 模式不会发送通知。启用后，每次 WorkManager **成对上传成功**（音频与侧车都成功，或合法无侧车单文件块成功）至少一个单元时，手表向 `ntfy_url` POST JSON
 
 首次安装后，配置会复制到手表内部存储 `filesDir/clawhark.jsonc`，之后以运行时文件为准。
 
@@ -296,7 +296,7 @@ python3 scripts/transcribe.py 2026-06-30 --provider gemini
 }
 ```
 
-实现位置：`app/src/main/java/ai/etti/clawhark/UploadNotifier.kt`，在上传 worker 至少成功上传一个音频或侧车文件后调用。
+实现位置：`app/src/main/java/ai/etti/clawhark/UploadNotifier.kt`，在上传 worker 至少成功上传一个**成对单元**后调用（半成功不会删本地，也不会发通知）。
 
 
 ### 3. 验证
@@ -535,7 +535,7 @@ clawhark/
 | `ChunkMetadata.kt` | **时间元数据** | 为每个 `.opus` 生成侧车 JSON,记录各段墙钟时间与音频偏移 |
 | `StreamingEncoder.kt` | **音频编码** | PCM→Opus 实时编码,MediaCodec + MediaMuxer |
 | `ServiceConfig.kt` | **配置管理** | 生产/调试模式配置,块时长、VAD、上传间隔 |
-| `StorageManager.kt` | **存储管理** | 文件清理,存储限制,孤立 .tmp 恢复 |
+| `StorageManager.kt` | **存储管理** | 成对清理空间,孤立 .tmp 恢复 |
 | `UploadScheduler.kt` | **上传调度** | WorkManager 定期上传,备用上传策略 |
 | `StatusLogger.kt` | **状态日志** | 电池/网络/音频状态监控,定期状态报告 |
 | `RecordingNotificationManager.kt` | **通知管理** | 前台通知,动态文本轮换 |
@@ -544,8 +544,8 @@ clawhark/
 
 | 文件 | 职责 | 支持的存储 |
 |------|------|-----------|
-| `UploadWorker.kt` | 后台上传协调 | WiFi 约束,重试机制;上传 `.opus` 及对应 `.opus.json` |
-| `UploadNotifier.kt` | 上传完成通知 | S3 模式下 POST ntfy `upload_complete` |
+| `UploadWorker.kt` | 后台上传协调 | WiFi 约束,重试机制;原子成对上传 `.opus` + `.opus.json`（两端成功才删本地） |
+| `UploadNotifier.kt` | 上传完成通知 | S3 模式下成对成功后 POST ntfy `upload_complete` |
 | `DriveUploader.kt` | Google Drive 实现 | 使用 Drive API v3 |
 | `S3Uploader.kt` | S3 兼容实现 | 支持七牛/阿里云/腾讯云等 S3 兼容服务 |
 | `StorageUploader.kt` | 存储接口 | 统一上传接口,可扩展新存储后端 |

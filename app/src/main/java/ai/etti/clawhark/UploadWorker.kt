@@ -12,6 +12,8 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         const val WORK_NAME = "upload_recordings"
         const val STALE_THRESHOLD_MS = 60 * 1000L // 60 seconds
         private const val FRESH_TMP_THRESHOLD_MS = 2 * 60 * 1000L
+        /** 无侧车时，音频需稳定超过此时长才视为「故意无 JSON」的完整单文件块 */
+        private const val STABLE_AUDIO_WITHOUT_SIDECAR_MS = 2 * 60 * 1000L
     }
 
     override suspend fun doWork(): Result {
@@ -29,15 +31,13 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             return Result.success()
         }
 
-        val audioFiles = dir.listFiles()?.filter {
-            it.extension == "opus" && !it.name.endsWith(".uploading")
-        }?.sortedBy { it.name } ?: emptyList()
-
+        val readyPairs = findReadyPairs(dir)
         val orphanedSidecars = findOrphanedSidecars(dir)
+        val notReadyCount = countNotReadyAudio(dir)
 
-        if (audioFiles.isEmpty() && orphanedSidecars.isEmpty()) {
-            if (hasFreshOpusTmp(dir)) {
-                AppLog.i(TAG, "检测到未完成的 .opus.tmp — 稍后重试")
+        if (readyPairs.isEmpty() && orphanedSidecars.isEmpty()) {
+            if (hasFreshOpusTmp(dir) || notReadyCount > 0) {
+                AppLog.i(TAG, "检测到未就绪块(新鲜tmp=${hasFreshOpusTmp(dir)}, 未配对音频=$notReadyCount) — 稍后重试")
                 return Result.retry()
             }
             AppLog.d(TAG, "没有文件需要上传")
@@ -82,15 +82,18 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         }
 
         val storageType = storageConfig!!.storageType
+        val pairWithSidecar = readyPairs.count { it.sidecar != null }
+        val pairAudioOnly = readyPairs.size - pairWithSidecar
+        val totalUnits = readyPairs.size + orphanedSidecars.size
 
-        val pairedSidecarCount = audioFiles.count { ChunkMetadata.sidecarFileFor(it).exists() }
-        val totalUploadCount = audioFiles.size + pairedSidecarCount + orphanedSidecars.size
-
-        AppLog.i(TAG, "上传 worker 已启动 — ${audioFiles.size} 个音频" +
-            (if (pairedSidecarCount + orphanedSidecars.size > 0) {
-                " + ${pairedSidecarCount + orphanedSidecars.size} 个元数据"
-            } else "") +
-            ", 共 $totalUploadCount 个文件 (${uploader.getStorageInfo()})")
+        AppLog.i(
+            TAG,
+            "上传 worker 已启动 — ${readyPairs.size} 个就绪块" +
+                " (成对 $pairWithSidecar, 仅音频 $pairAudioOnly)" +
+                (if (orphanedSidecars.isNotEmpty()) ", 孤立侧车 ${orphanedSidecars.size}" else "") +
+                (if (notReadyCount > 0) ", 未就绪跳过 $notReadyCount" else "") +
+                ", 共 $totalUnits 个单元 (${uploader.getStorageInfo()})"
+        )
 
         var audioSucceeded = 0
         var sidecarSucceeded = 0
@@ -98,23 +101,13 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         var consecutiveFailures = 0
 
         try {
-            for (file in audioFiles) {
-                val result = uploadFileWithLock(file, uploader, "音频")
+            for (pair in readyPairs) {
+                val result = uploadPairWithLock(pair, uploader)
                 when (result) {
                     UploadResult.SUCCESS -> {
                         audioSucceeded++
+                        if (pair.sidecar != null) sidecarSucceeded++
                         consecutiveFailures = 0
-                        val sidecar = ChunkMetadata.sidecarFileFor(file)
-                        if (sidecar.exists()) {
-                            when (uploadFileWithLock(sidecar, uploader, "侧车元数据")) {
-                                UploadResult.SUCCESS -> sidecarSucceeded++
-                                UploadResult.FAILED -> {
-                                    failed++
-                                    consecutiveFailures++
-                                }
-                                UploadResult.SKIPPED -> {}
-                            }
-                        }
                     }
                     UploadResult.FAILED -> {
                         failed++
@@ -122,17 +115,17 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                     }
                     UploadResult.SKIPPED -> {}
                 }
-
                 if (consecutiveFailures >= 3) {
                     AppLog.e(TAG, "连续 3 次失败 — 停止(可能是网络问题)")
                     break
                 }
             }
 
+            // 历史残留：仅侧车、本地音频已不存在时单独补传
             if (orphanedSidecars.isNotEmpty() && consecutiveFailures < 3) {
-                AppLog.i(TAG, "上传 ${orphanedSidecars.size} 个孤立侧车元数据")
+                AppLog.i(TAG, "上传 ${orphanedSidecars.size} 个孤立侧车元数据(历史残留)")
                 for (sidecar in orphanedSidecars) {
-                    when (uploadFileWithLock(sidecar, uploader, "孤立侧车元数据")) {
+                    when (uploadSingleWithLock(sidecar, uploader, "孤立侧车元数据", deleteOnSuccess = true)) {
                         UploadResult.SUCCESS -> sidecarSucceeded++
                         UploadResult.FAILED -> {
                             failed++
@@ -161,22 +154,130 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         }
 
         val summary = buildString {
-            append("上传 worker 完成 — 音频 $audioSucceeded/${audioFiles.size} 成功")
-            val totalSidecars = pairedSidecarCount + orphanedSidecars.size
-            if (totalSidecars > 0) append(", 元数据 $sidecarSucceeded/$totalSidecars 成功")
+            append("上传 worker 完成 — 音频 $audioSucceeded/${readyPairs.size} 成功")
+            val expectedSidecars = pairWithSidecar + orphanedSidecars.size
+            if (expectedSidecars > 0) append(", 元数据 $sidecarSucceeded/$expectedSidecars 成功")
             if (failed > 0) append(", $failed 失败")
-            append(", 共 $totalUploadCount 个文件")
+            append(", 共 $totalUnits 个单元")
         }
         AppLog.i(TAG, summary)
-        return if (failed == 0) Result.success() else Result.retry()
+        return if (failed == 0) {
+            if (notReadyCount > 0 || hasFreshOpusTmp(dir)) Result.retry() else Result.success()
+        } else {
+            Result.retry()
+        }
     }
+
+    private data class ReadyPair(val audio: File, val sidecar: File?)
 
     private enum class UploadResult { SUCCESS, FAILED, SKIPPED }
 
-    private suspend fun uploadFileWithLock(
+    /** 成对就绪：有侧车；或故意无侧车且音频已稳定 */
+    private fun findReadyPairs(dir: File): List<ReadyPair> {
+        val now = System.currentTimeMillis()
+        return dir.listFiles()?.filter {
+            it.isFile && it.extension == "opus" && !it.name.endsWith(".uploading")
+        }?.sortedBy { it.name }?.mapNotNull { audio ->
+            val sidecar = ChunkMetadata.sidecarFileFor(audio)
+            when {
+                sidecar.exists() && !sidecar.name.endsWith(".uploading") ->
+                    ReadyPair(audio, sidecar)
+                isAudioNotReadyWithoutSidecar(audio, now) ->
+                    null // 未就绪：对应 tmp 仍在或音频过新
+                else ->
+                    ReadyPair(audio, null) // 稳定无侧车 → 合法单文件块
+            }
+        } ?: emptyList()
+    }
+
+    private fun countNotReadyAudio(dir: File): Int {
+        val now = System.currentTimeMillis()
+        return dir.listFiles()?.count { file ->
+            file.isFile &&
+                file.extension == "opus" &&
+                !file.name.endsWith(".uploading") &&
+                !ChunkMetadata.sidecarFileFor(file).exists() &&
+                isAudioNotReadyWithoutSidecar(file, now)
+        } ?: 0
+    }
+
+    /** 无侧车且仍可能在 finalize（有同名 .opus.tmp，或音频刚出现） */
+    private fun isAudioNotReadyWithoutSidecar(audio: File, now: Long = System.currentTimeMillis()): Boolean {
+        val matchingTmp = File(audio.parent, audio.name + ".tmp")
+        if (matchingTmp.exists() && (now - matchingTmp.lastModified() < FRESH_TMP_THRESHOLD_MS)) {
+            return true
+        }
+        return now - audio.lastModified() < STABLE_AUDIO_WITHOUT_SIDECAR_MS
+    }
+
+    /**
+     * 占用成对文件 → 依次上传 → 全部成功才删除；任一步失败则恢复本地文件名。
+     */
+    private suspend fun uploadPairWithLock(pair: ReadyPair, uploader: StorageUploader): UploadResult {
+        val audioUploading = File(pair.audio.parent, pair.audio.name + ".uploading")
+        if (!pair.audio.renameTo(audioUploading)) {
+            AppLog.d(TAG, "无法占用 ${pair.audio.name} — 跳过(可能是另一个 worker)")
+            return UploadResult.SKIPPED
+        }
+
+        var sidecarUploading: File? = null
+        val sidecar = pair.sidecar
+        if (sidecar != null) {
+            val target = File(sidecar.parent, sidecar.name + ".uploading")
+            if (!sidecar.renameTo(target)) {
+                AppLog.d(TAG, "无法占用 ${sidecar.name} — 恢复音频并跳过")
+                audioUploading.renameTo(pair.audio)
+                return UploadResult.SKIPPED
+            }
+            sidecarUploading = target
+        }
+
+        AppLog.i(
+            TAG,
+            "上传中(成对): ${pair.audio.name}" +
+                (if (sidecar != null) " + ${sidecar.name}" else " (无侧车)") +
+                " (${audioUploading.length() / 1024}KB)"
+        )
+        val startMs = System.currentTimeMillis()
+
+        val audioOk = uploader.uploadFile(audioUploading)
+        if (!audioOk) {
+            restoreUploading(audioUploading, pair.audio)
+            sidecarUploading?.let { restoreUploading(it, sidecar!!) }
+            AppLog.e(TAG, "上传失败(成对-音频): ${pair.audio.name} 耗时 ${System.currentTimeMillis() - startMs}ms")
+            return UploadResult.FAILED
+        }
+
+        if (sidecarUploading != null) {
+            val sidecarOk = uploader.uploadFile(sidecarUploading)
+            if (!sidecarOk) {
+                // 半成功：两端都不删，下次整对重传覆盖
+                restoreUploading(audioUploading, pair.audio)
+                restoreUploading(sidecarUploading, sidecar!!)
+                AppLog.e(
+                    TAG,
+                    "上传失败(成对-侧车): ${sidecar!!.name} — 本地成对已保留 耗时 ${System.currentTimeMillis() - startMs}ms"
+                )
+                return UploadResult.FAILED
+            }
+        }
+
+        audioUploading.delete()
+        sidecarUploading?.delete()
+        AppLog.i(
+            TAG,
+            "上传成功(成对): ${pair.audio.name}" +
+                (if (sidecar != null) " + ${sidecar.name}" else "") +
+                " 耗时 ${System.currentTimeMillis() - startMs}ms"
+        )
+        return UploadResult.SUCCESS
+    }
+
+    private suspend fun uploadSingleWithLock(
         file: File,
         uploader: StorageUploader,
-        label: String
+        label: String,
+        deleteOnSuccess: Boolean
     ): UploadResult {
         val uploadingFile = File(file.parent, file.name + ".uploading")
         if (!file.renameTo(uploadingFile)) {
@@ -190,19 +291,24 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val elapsed = System.currentTimeMillis() - startMs
 
         return if (ok) {
-            uploadingFile.delete()
+            if (deleteOnSuccess) uploadingFile.delete()
+            else restoreUploading(uploadingFile, file)
             AppLog.i(TAG, "上传成功($label): ${file.name} 耗时 ${elapsed}ms")
             UploadResult.SUCCESS
         } else {
-            if (!uploadingFile.renameTo(file)) {
-                AppLog.w(TAG, "无法恢复 ${uploadingFile.name} — 文件可能孤立")
-            }
+            restoreUploading(uploadingFile, file)
             AppLog.e(TAG, "上传失败($label): ${file.name} 耗时 ${elapsed}ms")
             UploadResult.FAILED
         }
     }
 
-    /** 侧车 JSON 存在但对应 .opus 已上传删除的遗留文件 */
+    private fun restoreUploading(uploading: File, original: File) {
+        if (!uploading.renameTo(original)) {
+            AppLog.w(TAG, "无法恢复 ${uploading.name} — 文件可能孤立")
+        }
+    }
+
+    /** 侧车 JSON 存在但对应 .opus 已不存在的遗留文件 */
     private fun findOrphanedSidecars(dir: File): List<File> {
         return dir.listFiles()?.filter { file ->
             file.isFile &&
@@ -215,7 +321,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     private fun recoverStaleFiles(dir: File) {
         val now = System.currentTimeMillis()
         val staleUploading = dir.listFiles()?.filter {
-            it.extension == "uploading" && (now - it.lastModified() > STALE_THRESHOLD_MS)
+            it.name.endsWith(".uploading") && (now - it.lastModified() > STALE_THRESHOLD_MS)
         } ?: emptyList()
         for (stale in staleUploading) {
             val ageMs = now - stale.lastModified()
