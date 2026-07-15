@@ -100,9 +100,7 @@ class RecordingService : Service() {
                 getSharedPreferences(PREF_FILE, MODE_PRIVATE)
                     .edit().putBoolean(PREF_SHOULD_RECORD, false).apply()
                 logFinalStats()
-                stopRecording()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                stopRecording(shutdownAfter = true)
                 return START_NOT_STICKY
             }
             ACTION_CHARGING_POLICY_CHANGED -> {
@@ -311,18 +309,45 @@ class RecordingService : Service() {
         }
     }
 
-    private fun stopRecording() {
+    /**
+     * 双阶段停录：立刻上传已落盘文件，等 finalize 后再 APPEND 补传尾块，最后取消周期任务。
+     * @param shutdownAfter 手动停止时为 true，收尾完成后 stopForeground + stopSelf
+     */
+    private fun stopRecording(shutdownAfter: Boolean = false) {
         if (!audioRecorder.isCurrentlyRecording()) {
             AppLog.d(TAG, "未在录音")
+            if (shutdownAfter) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
             return
         }
         AppLog.i(TAG, "=== 停止录音 ===")
+        // 立即清标志，供 UI / 充电暂停状态使用；finalize 由 stopAndAwait 等待
         audioRecorder.stop()
         notificationManager.stopWordRotation()
         updateComplication()
-        
-        uploadScheduler.cancelPeriodicUploads()
+
+        // 阶段1：立刻传已落盘的 .opus（与 finalize 并行）
         uploadScheduler.triggerImmediateUpload()
+
+        scope.launch {
+            try {
+                audioRecorder.stopAndAwait()
+                // 阶段2：尾块已落盘，排队补传（APPEND 不打断阶段1）
+                uploadScheduler.triggerImmediateUpload(append = true)
+                uploadScheduler.cancelPeriodicUploads()
+            } catch (e: Exception) {
+                AppLog.e(TAG, "停录收尾失败", e)
+                uploadScheduler.triggerImmediateUpload(append = true)
+                uploadScheduler.cancelPeriodicUploads()
+            } finally {
+                if (shutdownAfter) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
+            }
+        }
     }
 
     fun isCurrentlyRecording() = audioRecorder.isCurrentlyRecording()

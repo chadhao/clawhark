@@ -10,7 +10,8 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     companion object {
         const val TAG = "Upload"
         const val WORK_NAME = "upload_recordings"
-        const val STALE_THRESHOLD_MS = 10 * 60 * 1000L // 10 minutes
+        const val STALE_THRESHOLD_MS = 60 * 1000L // 60 seconds
+        private const val FRESH_TMP_THRESHOLD_MS = 2 * 60 * 1000L
     }
 
     override suspend fun doWork(): Result {
@@ -35,6 +36,10 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val orphanedSidecars = findOrphanedSidecars(dir)
 
         if (audioFiles.isEmpty() && orphanedSidecars.isEmpty()) {
+            if (hasFreshOpusTmp(dir)) {
+                AppLog.i(TAG, "检测到未完成的 .opus.tmp — 稍后重试")
+                return Result.retry()
+            }
             AppLog.d(TAG, "没有文件需要上传")
             return Result.success()
         }
@@ -220,5 +225,15 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 AppLog.i(TAG, "恢复过时的上传文件: $originalName (年龄: ${ageMs / 1000}s)")
             }
         }
+    }
+
+    /** 停录 finalize 尚未 rename 时，避免空跑 success 漏传最后一块 */
+    private fun hasFreshOpusTmp(dir: File): Boolean {
+        val now = System.currentTimeMillis()
+        return dir.listFiles()?.any { file ->
+            file.isFile &&
+                file.name.endsWith(".opus.tmp") &&
+                (now - file.lastModified() < FRESH_TMP_THRESHOLD_MS)
+        } == true
     }
 }

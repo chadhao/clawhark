@@ -89,13 +89,21 @@ class UploadScheduler(
         wm.cancelUniqueWork(UPLOAD_FALLBACK_WORK_NAME)
     }
     
-    fun triggerImmediateUpload() {
+    /**
+     * @param append true 时排队到现有立即上传之后；若上一轮已结束则重新入队（APPEND_OR_REPLACE）
+     */
+    fun triggerImmediateUpload(append: Boolean = false) {
         val oneTimeWork = OneTimeWorkRequestBuilder<UploadWorker>().build()
+        val policy = if (append) {
+            ExistingWorkPolicy.APPEND_OR_REPLACE
+        } else {
+            ExistingWorkPolicy.REPLACE
+        }
         WorkManager.getInstance(context).enqueueUniqueWork(
             IMMEDIATE_WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
+            policy,
             oneTimeWork
         )
-        AppLog.i(TAG, "立即上传已触发")
+        AppLog.i(TAG, if (append) "立即上传已排队(APPEND_OR_REPLACE)" else "立即上传已触发")
     }
 }

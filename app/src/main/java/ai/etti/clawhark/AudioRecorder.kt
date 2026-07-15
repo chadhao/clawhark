@@ -126,6 +126,33 @@ class AudioRecorder(
         AppLog.i(TAG, "=== 停止录音 ===")
         isRecording = false
     }
+
+    /**
+     * 停止录音并等待当前块 finalize（rename .tmp → .opus + 写 sidecar）完成。
+     * 调用方应在返回后再调度「补传尾块」的上传。
+     */
+    suspend fun stopAndAwait(timeoutMs: Long = 15_000) {
+        val job = recordJob
+        if (!isRecording && job?.isActive != true) {
+            AppLog.d(TAG, "未在录音")
+            return
+        }
+        AppLog.i(TAG, "=== 停止录音(等待finalize) ===")
+        isRecording = false
+        // 打断阻塞的 AudioRecord.read()，加快退出循环进入 finally
+        try {
+            audioRecord?.stop()
+        } catch (_: Exception) {}
+
+        val finished = withTimeoutOrNull(timeoutMs) {
+            job?.join()
+        }
+        if (finished == null) {
+            AppLog.w(TAG, "等待录音循环finalize超时 (${timeoutMs}ms)")
+        } else {
+            AppLog.i(TAG, "录音循环已结束")
+        }
+    }
     
     fun isCurrentlyRecording() = isRecording
     
