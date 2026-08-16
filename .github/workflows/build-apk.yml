@@ -50,6 +50,14 @@ jobs:
           echo "=== 修复后的 gradle.properties ==="
           cat gradle.properties
 
+      - name: 修复 settings.gradle.kts（替换阿里云镜像为 Google 官方仓库）
+        run: |
+          sed -i 's|https://maven.aliyun.com/repository/google|https://dl.google.com/dl/android/maven2|g' settings.gradle.kts
+          sed -i 's|https://maven.aliyun.com/repository/public|https://repo.maven.apache.org/maven2|g' settings.gradle.kts
+          sed -i 's|https://maven.aliyun.com/repository/gradle-plugin|https://plugins.gradle.org/m2|g' settings.gradle.kts
+          echo "=== 修复后的 settings.gradle.kts ==="
+          cat settings.gradle.kts
+
       - name: 授予 gradlew 执行权限
         run: chmod +x gradlew
 
