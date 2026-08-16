@@ -44,18 +44,20 @@ jobs:
             "platforms;android-34" \
             "build-tools;34.0.0"
 
-      - name: 修复 gradle.properties（移除 Windows 硬编码 JAVA_HOME）
+      - name: 修复 gradle.properties（移除全部 Windows 残留）
         run: |
           sed -i '/org.gradle.java.home/d' gradle.properties
-          echo "=== 修复后的 gradle.properties ==="
+          sed -i 's|-Djavax.net.ssl.trustStoreType=Windows-ROOT||g' gradle.properties
+          sed -i '/^systemProp\./d' gradle.properties
+          echo "=== 修复后 gradle.properties ==="
           cat gradle.properties
 
-      - name: 修复 settings.gradle.kts（替换阿里云镜像为 Google 官方仓库）
+      - name: 修复 settings.gradle.kts（替换阿里云镜像为官方仓库）
         run: |
           sed -i 's|https://maven.aliyun.com/repository/google|https://dl.google.com/dl/android/maven2|g' settings.gradle.kts
           sed -i 's|https://maven.aliyun.com/repository/public|https://repo.maven.apache.org/maven2|g' settings.gradle.kts
           sed -i 's|https://maven.aliyun.com/repository/gradle-plugin|https://plugins.gradle.org/m2|g' settings.gradle.kts
-          echo "=== 修复后的 settings.gradle.kts ==="
+          echo "=== 修复后 settings.gradle.kts ==="
           cat settings.gradle.kts
 
       - name: 授予 gradlew 执行权限
@@ -64,7 +66,7 @@ jobs:
       - name: 清理 .gradle 缓存
         run: rm -rf ~/.gradle/caches
 
-      - name: 构建 Debug APK
+      - name: 构建 Debug APK（不签名，避免 keystore 缺失问题）
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: 验证 APK 生成
