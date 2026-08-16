@@ -30,7 +30,7 @@ class S3Uploader(private val config: S3Config) : StorageUploader {
         client.setS3ClientOptions(
             S3ClientOptions.builder()
                 .setPathStyleAccess(true)
-                .setChunkedEncodingDisabled(true) // 禁用流式分块签名，兼容 Cloudflare R2
+                .disableChunkedEncoding() // 禁用流式分块签名，兼容 Cloudflare R2
                 .build()
         )
         
