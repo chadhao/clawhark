@@ -32,7 +32,6 @@ jobs:
           unzip -q commandlinetools-linux-11076708_latest.zip
           rm -rf $ANDROID_HOME/cmdline-tools/latest
           mv cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-          ls $ANDROID_HOME/cmdline-tools/latest/bin/
 
       - name: 接受 SDK 许可
         run: |
@@ -45,14 +44,11 @@ jobs:
             "platforms;android-34" \
             "build-tools;34.0.0"
 
-      - name: 验证 SDK 安装
+      - name: 修复 gradle.properties（移除 Windows 硬编码 JAVA_HOME）
         run: |
-          echo "==> platforms:"
-          ls $ANDROID_HOME/platforms/ 2>/dev/null
-          echo "==> build-tools:"
-          ls $ANDROID_HOME/build-tools/ 2>/dev/null
-          echo "==> sdkmanager 版本:"
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --version
+          sed -i '/org.gradle.java.home/d' gradle.properties
+          echo "=== 修复后的 gradle.properties ==="
+          cat gradle.properties
 
       - name: 授予 gradlew 执行权限
         run: chmod +x gradlew
