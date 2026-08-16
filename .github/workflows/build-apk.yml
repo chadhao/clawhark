@@ -37,8 +37,6 @@ jobs:
       - name: 接受 SDK 许可
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-        env:
-          JAVA_HOME: $JAVA_HOME
 
       - name: 安装必需的 SDK 组件
         run: |
@@ -46,8 +44,6 @@ jobs:
             "platform-tools" \
             "platforms;android-34" \
             "build-tools;34.0.0"
-        env:
-          JAVA_HOME: $JAVA_HOME
 
       - name: 验证 SDK 安装
         run: |
@@ -65,9 +61,6 @@ jobs:
         run: rm -rf ~/.gradle/caches
 
       - name: 构建 Debug APK
-        env:
-          JAVA_HOME: $JAVA_HOME
-          ANDROID_HOME: $ANDROID_HOME
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: 验证 APK 生成
