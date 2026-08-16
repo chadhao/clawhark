@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -18,21 +19,45 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 安装 Android SDK
-        uses: android-actions/setup-android@v3
+      - name: 准备 Android SDK（cmdline-tools）
+        uses: actions/setup-android@v3
+        with:
+          cmdline-tools: latest
 
       - name: 接受 SDK 许可
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+
+      - name: 安装平台和构建工具
         run: |
-          yes | sdkmanager --licenses || true
+          echo "y" | sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+        env:
+          JAVA_HOME: $JAVA_HOME
+
+      - name: 验证 SDK 安装
+        run: |
+          ls $ANDROID_HOME/platforms/ 2>/dev/null || echo "platforms 目录为空"
+          ls $ANDROID_HOME/build-tools/ 2>/dev/null || echo "build-tools 目录为空"
 
       - name: 授予 gradlew 执行权限
         run: chmod +x gradlew
 
+      - name: 清理 .gradle 缓存（避免依赖污染）
+        run: rm -rf ~/.gradle/caches
+
       - name: 构建 Debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        env:
+          JAVA_HOME: $JAVA_HOME
+          ANDROID_HOME: $ANDROID_HOME
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: 验证 APK 生成
+        run: |
+          ls -la app/build/outputs/apk/debug/
+          file app/build/outputs/apk/debug/app-debug.apk
 
       - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
         with:
           name: clawhark-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
