@@ -19,29 +19,49 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 准备 Android SDK（cmdline-tools）
-        uses: actions/setup-android@v3
-        with:
-          cmdline-tools: latest
+      - name: 配置 Android SDK 路径
+        run: |
+          mkdir -p $HOME/.android/sdk/cmdline-tools
+          echo "ANDROID_HOME=$HOME/.android/sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$HOME/.android/sdk" >> $GITHUB_ENV
+
+      - name: 安装 Android cmdline-tools
+        run: |
+          cd /tmp
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-11076708_latest.zip
+          rm -rf $ANDROID_HOME/cmdline-tools/latest
+          mv cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+          ls $ANDROID_HOME/cmdline-tools/latest/bin/
 
       - name: 接受 SDK 许可
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-
-      - name: 安装平台和构建工具
         run: |
-          echo "y" | sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+        env:
+          JAVA_HOME: $JAVA_HOME
+
+      - name: 安装必需的 SDK 组件
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
         env:
           JAVA_HOME: $JAVA_HOME
 
       - name: 验证 SDK 安装
         run: |
-          ls $ANDROID_HOME/platforms/ 2>/dev/null || echo "platforms 目录为空"
-          ls $ANDROID_HOME/build-tools/ 2>/dev/null || echo "build-tools 目录为空"
+          echo "==> platforms:"
+          ls $ANDROID_HOME/platforms/ 2>/dev/null
+          echo "==> build-tools:"
+          ls $ANDROID_HOME/build-tools/ 2>/dev/null
+          echo "==> sdkmanager 版本:"
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --version
 
       - name: 授予 gradlew 执行权限
         run: chmod +x gradlew
 
-      - name: 清理 .gradle 缓存（避免依赖污染）
+      - name: 清理 .gradle 缓存
         run: rm -rf ~/.gradle/caches
 
       - name: 构建 Debug APK
